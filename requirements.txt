@@ -1,0 +1,65 @@
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.19
+
+# Pydantic & Validation
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# LangChain Core
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-community==0.3.14
+langchain-text-splitters==0.3.4
+langchain-openai==0.3.0
+langchain-anthropic==0.3.4
+langchain-google-genai==2.0.9
+
+# Document Loaders
+pypdf==5.1.0
+python-docx==1.1.2
+beautifulsoup4==4.12.3
+
+# Embeddings
+sentence-transformers==3.3.1
+torch>=2.0.0
+
+# Vector Stores
+faiss-cpu==1.9.0.post1
+chromadb==0.5.23
+qdrant-client==1.12.1
+pinecone-client==5.0.1
+
+# LLM Providers
+openai==1.58.1
+anthropic==0.42.0
+google-generativeai==0.8.4
+ollama==0.4.4
+
+# Utilities
+python-dotenv==1.0.1
+httpx==0.28.1
+tiktoken==0.8.0
+
+# Monitoring & Logging
+structlog==24.4.0
+rich==13.9.4
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+
+# Development
+black==24.10.0
+ruff==0.8.6
+mypy==1.14.1
+isort==5.13.2
