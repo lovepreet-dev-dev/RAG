@@ -22,6 +22,7 @@ class QueryType(str, Enum):
     REASONING = "reasoning"
     CODE = "code"
     MATH = "math"
+    UNKNOWN = "unknown"
 
 
 @dataclass

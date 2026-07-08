@@ -119,7 +119,7 @@ class RAGService:
     def validator(self) -> AnswerValidator | None:
         """Lazy-load the answer validator if enabled."""
         if self._settings.enable_answer_validation and self._validator is None:
-            self._validator = AnswerValidator(llm=self.llm, settings=self._settings)
+            self._validator = AnswerValidator(llm=self.llm)
         return self._validator
 
     def query(self, request: QueryRequest) -> QueryResponse:
@@ -165,15 +165,15 @@ class RAGService:
         validation_result: ValidationResult | None = None
         if self.validator is not None:
             validation_result = self.validator.validate(
-                query=request.question,
                 answer=answer,
-                documents=context_results,
+                sources=context_results,
+                query=request.question,
             )
             logger.info(
                 "stage_9_validation",
-                citations_ok=validation_result.citations_ok,
+                is_valid=validation_result.is_valid,
                 coverage=round(validation_result.coverage_score, 3),
-                hallucinated=len(validation_result.hallucinated_claims),
+                unsupported=len(validation_result.unsupported_statements),
             )
 
         # ── Build sources and compute answer confidence ──────────────────
@@ -211,7 +211,7 @@ class RAGService:
             confidence=answer_confidence.level,
             confidence_score=round(answer_confidence.score, 4),
             retrieval_confidence=round(retrieval_confidence.score, 4),
-            validation_ok=validation_result.citations_ok if validation_result else None,
+            validation_ok=validation_result.is_valid if validation_result else None,
         )
 
         return QueryResponse(
@@ -327,7 +327,9 @@ class RAGService:
         validation_result: ValidationResult | None = None
         if self.validator is not None:
             validation_result = self.validator.validate(
-                query=standalone_q, answer=full_answer, documents=context_results,
+                answer=full_answer,
+                sources=context_results,
+                query=standalone_q,
             )
 
         yield StreamChunk(

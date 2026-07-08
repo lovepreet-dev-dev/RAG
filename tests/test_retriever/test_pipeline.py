@@ -82,19 +82,19 @@ class TestParallelRetrieval:
 
     def test_returns_results(self, pipeline) -> None:
         """Pipeline should return results."""
-        results, confidence = pipeline.retrieve("programming language")
+        results, confidence, _ = pipeline.retrieve("programming language")
         assert len(results) > 0
         assert confidence.score >= 0.0
 
     def test_multiple_strategies_used(self, pipeline) -> None:
         """Results should come from multiple strategies."""
-        results, _ = pipeline.retrieve("programming language")
+        results, _, _ = pipeline.retrieve("programming language")
         strategies = {r.strategy for r in results}
         assert len(strategies) > 1
 
     def test_results_are_retrieval_results(self, pipeline) -> None:
         """Results should be RetrievalResult objects."""
-        results, _ = pipeline.retrieve("programming language")
+        results, _, _ = pipeline.retrieve("programming language")
         for r in results:
             assert isinstance(r, RetrievalResult)
             assert isinstance(r.document, Document)
@@ -103,14 +103,14 @@ class TestParallelRetrieval:
 
     def test_deduplication(self, pipeline) -> None:
         """Duplicate documents should be removed."""
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         contents = [r.document.page_content for r in results]
         assert len(contents) == len(set(contents))
 
     def test_score_threshold(self, pipeline) -> None:
         """Score threshold should filter low-scoring results."""
-        results_high, _ = pipeline.retrieve("programming", score_threshold=0.99)
-        results_low, _ = pipeline.retrieve("programming", score_threshold=0.0)
+        results_high, _, _ = pipeline.retrieve("programming", score_threshold=0.99)
+        results_low, _, _ = pipeline.retrieve("programming", score_threshold=0.0)
         assert len(results_high) <= len(results_low)
 
 
@@ -155,7 +155,7 @@ class TestContextSelection:
 
     def test_respects_token_budget(self, pipeline) -> None:
         """Selected results should fit within token budget."""
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         selected = pipeline.select_final_context(results, max_tokens=100)
         # Verify all selected fit in budget
         from app.utils.helpers import estimate_tokens
@@ -164,7 +164,7 @@ class TestContextSelection:
 
     def test_prefers_diversity(self, pipeline) -> None:
         """Context selection should avoid duplicate content."""
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         selected = pipeline.select_final_context(results)
         contents = [r.document.page_content for r in selected]
         assert len(contents) == len(set(contents))
@@ -183,7 +183,7 @@ class TestScoreNormalization:
 
     def test_normalized_scores_in_0_1(self, pipeline) -> None:
         """All scores should be in [0, 1] after normalization."""
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         for r in results:
             assert 0.0 <= r.score <= 1.0
 
@@ -196,13 +196,13 @@ class TestConfidenceInPipeline:
 
     def test_confidence_in_response(self, pipeline) -> None:
         """Pipeline should return valid confidence."""
-        _, confidence = pipeline.retrieve("programming language")
+        _, confidence, _ = pipeline.retrieve("programming language")
         assert 0.0 <= confidence.score <= 1.0
         assert confidence.total_results > 0
 
     def test_confidence_with_strategies(self, pipeline) -> None:
         """Confidence should account for multi-strategy agreement."""
-        _, confidence = pipeline.retrieve("programming language")
+        _, confidence, _ = pipeline.retrieve("programming language")
         # With similarity + mmr + hybrid enabled, agreement should be > 0
         assert confidence.agreement_ratio > 0.0
 

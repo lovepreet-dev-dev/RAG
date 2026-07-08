@@ -8,7 +8,6 @@ from langchain_core.documents import Document
 from app.retriever.confidence import (
     RetrievalConfidence,
     RetrievalResult,
-    AnswerConfidence,
     compute_answer_confidence,
     compute_retrieval_confidence,
     deduplicate_results,
@@ -113,7 +112,8 @@ class TestAnswerConfidence:
         retrieval = RetrievalConfidence(
             score=0.1, avg_score=0.1, score_variance=0.01,
             agreement_ratio=0.33, document_diversity=0.5,
-            metadata_consistency=0.5, total_results=3,
+            metadata_consistency=0.5, chunk_overlap_ratio=0.0,
+            total_results=3,
             unique_documents=2, strategy_counts={"similarity": 3},
         )
         conf = compute_answer_confidence(retrieval)
@@ -125,7 +125,8 @@ class TestAnswerConfidence:
         retrieval = RetrievalConfidence(
             score=0.9, avg_score=0.9, score_variance=0.001,
             agreement_ratio=1.0, document_diversity=1.0,
-            metadata_consistency=1.0, total_results=9,
+            metadata_consistency=1.0, chunk_overlap_ratio=0.8,
+            total_results=9,
             unique_documents=9, strategy_counts={"similarity": 3, "mmr": 3, "hybrid": 3},
         )
         conf = compute_answer_confidence(
@@ -141,7 +142,8 @@ class TestAnswerConfidence:
         retrieval = RetrievalConfidence(
             score=0.5, avg_score=0.5, score_variance=0.05,
             agreement_ratio=0.66, document_diversity=0.7,
-            metadata_consistency=0.7, total_results=6,
+            metadata_consistency=0.7, chunk_overlap_ratio=0.5,
+            total_results=6,
             unique_documents=4, strategy_counts={"similarity": 3, "mmr": 3},
         )
         conf = compute_answer_confidence(retrieval)
@@ -152,7 +154,8 @@ class TestAnswerConfidence:
         retrieval = RetrievalConfidence(
             score=0.5, avg_score=0.5, score_variance=0.05,
             agreement_ratio=0.66, document_diversity=0.7,
-            metadata_consistency=0.7, total_results=6,
+            metadata_consistency=0.7, chunk_overlap_ratio=0.5,
+            total_results=6,
             unique_documents=4, strategy_counts={"similarity": 3, "mmr": 3},
         )
         no_rerank = compute_answer_confidence(retrieval)
@@ -164,7 +167,8 @@ class TestAnswerConfidence:
         retrieval = RetrievalConfidence(
             score=0.5, avg_score=0.5, score_variance=0.05,
             agreement_ratio=0.5, document_diversity=0.5,
-            metadata_consistency=0.5, total_results=5,
+            metadata_consistency=0.5, chunk_overlap_ratio=0.5,
+            total_results=5,
             unique_documents=3, strategy_counts={"similarity": 5},
         )
         conf = compute_answer_confidence(retrieval)

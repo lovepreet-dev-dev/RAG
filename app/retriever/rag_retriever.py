@@ -483,6 +483,9 @@ class RAGRetriever:
         from langchain_core.runnables import RunnablePassthrough
         from app.config.constants import RAG_SYSTEM_PROMPT, RAG_USER_PROMPT_TEMPLATE
 
+        if self._llm is None:
+            raise ValueError("LLM is required to build a RAG chain")
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", RAG_SYSTEM_PROMPT),
             ("human", RAG_USER_PROMPT_TEMPLATE),

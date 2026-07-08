@@ -99,7 +99,7 @@ class TestRetrievalPipeline:
             llm=None,
             settings=settings,
         )
-        results, confidence = pipeline.retrieve("programming language")
+        results, confidence, _ = pipeline.retrieve("programming language")
         assert len(results) > 0
         assert 0.0 <= confidence.score <= 1.0
 
@@ -111,7 +111,7 @@ class TestRetrievalPipeline:
             llm=None,
             settings=settings,
         )
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         contents = [r.document.page_content for r in results]
         assert len(contents) == len(set(contents))
 
@@ -123,7 +123,7 @@ class TestRetrievalPipeline:
             llm=None,
             settings=settings,
         )
-        results, _ = pipeline.retrieve("programming")
+        results, _, _ = pipeline.retrieve("programming")
         selected = pipeline.select_final_context(results, max_tokens=50)
         from app.utils.helpers import estimate_tokens
         total = sum(estimate_tokens(r.document.page_content) for r in selected)

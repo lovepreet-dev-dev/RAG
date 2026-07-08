@@ -39,10 +39,10 @@ class TestQueryExpander:
         result = expander_no_llm.expand_keywords("the a an")
         assert isinstance(result, list)
 
-    def test_multi_query_no_llm_returns_empty(self, expander_no_llm: QueryExpander) -> None:
-        result = expander_no_llm.expand_multi_query("What is ML?", count=3)
-        assert result == []
+    def test_multi_query_no_llm_returns_original(self, expander_no_llm: QueryExpander) -> None:
+        result = expander_no_llm.expand_multi_query("What is ML?", num_queries=3)
+        assert result == ["What is ML?"]
 
-    def test_hyde_no_llm_returns_empty(self, expander_no_llm: QueryExpander) -> None:
+    def test_hyde_no_llm_returns_original(self, expander_no_llm: QueryExpander) -> None:
         result = expander_no_llm.expand_hyde("What is ML?")
-        assert result == ""
+        assert result == "What is ML?"

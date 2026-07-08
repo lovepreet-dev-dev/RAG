@@ -18,6 +18,32 @@ services:
       retries: 3
       start_period: 15s
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: rag-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - rag-api
+      - frontend
+    restart: unless-stopped
+
   # Optional: Qdrant
   # qdrant:
   #   image: qdrant/qdrant:latest

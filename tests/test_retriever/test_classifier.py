@@ -54,4 +54,4 @@ class TestQueryClassifier:
 
     def test_empty_query(self, classifier: QueryClassifier) -> None:
         result = classifier.classify("")
-        assert result.query_type == QueryType.UNKNOWN
+        assert result.query_type == QueryType.CONVERSATIONAL

@@ -34,6 +34,18 @@ class ValidationResult:
     issues: list[str] = field(default_factory=list)
     unsupported_statements: list[str] = field(default_factory=list)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "is_valid": self.is_valid,
+            "citation_score": round(self.citation_score, 4),
+            "coverage_score": round(self.coverage_score, 4),
+            "hallucination_score": round(self.hallucination_score, 4),
+            "overall_score": round(self.overall_score, 4),
+            "issues": self.issues,
+            "unsupported_statements": self.unsupported_statements,
+        }
+
 
 class AnswerValidator:
     """Validates LLM answers against source documents."""

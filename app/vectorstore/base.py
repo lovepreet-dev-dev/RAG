@@ -130,10 +130,10 @@ class BaseVectorStore(VectorStore, ABC):
         filter_dict: Optional[dict[str, Any]] = None,
         collection_name: Optional[str] = None,
         **kwargs: Any,
-    ) -> list[Document]:
+    ) -> list[tuple[Document, float]]:
         """Hybrid search combining keyword and semantic methods.
 
-        Default implementation falls back to similarity_search.
+        Default implementation falls back to similarity_search_with_score.
         Override in subclasses with native hybrid support.
 
         Args:
@@ -142,9 +142,9 @@ class BaseVectorStore(VectorStore, ABC):
             filter_dict: Optional metadata filters.
 
         Returns:
-            List of Document objects.
+            List of (Document, score) tuples.
         """
-        return self.similarity_search(
+        return self.similarity_search_with_score(
             query, k=k, filter_dict=filter_dict, collection_name=collection_name
         )
 
@@ -161,3 +161,29 @@ class BaseVectorStore(VectorStore, ABC):
         Default implementation is a no-op. Override for FAISS or other
         stateful stores.
         """
+
+    @classmethod
+    def from_texts(
+        cls,
+        texts: list[str],
+        embedding: Any = None,
+        metadatas: Optional[list[dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> "BaseVectorStore":
+        """Create a store from raw texts (LangChain VectorStore interface).
+
+        Args:
+            texts: List of text strings.
+            embedding: Embedding function (unused, kept for interface compat).
+            metadatas: Optional metadata per text.
+
+        Returns:
+            Populated store instance.
+        """
+        store = cls(embedding_function=embedding, **kwargs)
+        docs = [
+            Document(page_content=t, metadata=metadatas[i] if metadatas else {})
+            for i, t in enumerate(texts)
+        ]
+        store.add_documents(docs)
+        return store

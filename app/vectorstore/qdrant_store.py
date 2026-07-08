@@ -173,7 +173,7 @@ class QdrantVectorStore(BaseVectorStore):
             payload = hit.payload or {}
             doc = Document(
                 page_content=payload.get("text", ""),
-                metadata={k: v for k, v in payload.items() if k != "text"},
+                metadata={pk: pv for pk, pv in payload.items() if pk != "text"},
             )
             docs_with_scores.append((doc, float(hit.score)))
         return docs_with_scores
