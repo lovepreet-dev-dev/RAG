@@ -260,3 +260,72 @@ class ErrorResponse(BaseModel):
 
     detail: str
     error_code: Optional[str] = None
+
+
+# ── Auth Schemas ───────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    """Login request payload."""
+
+    email: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    """User registration request."""
+
+    email: str = Field(..., min_length=3, max_length=255)
+    name: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+    role: str = Field(default="employee", pattern="^(admin|employee|viewer)$")
+
+
+class ChangePasswordRequest(BaseModel):
+    """Change password request."""
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    """JWT token response."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int  # seconds
+
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request."""
+
+    refresh_token: str
+
+
+class UserResponse(BaseModel):
+    """User information response."""
+
+    id: str
+    email: str
+    name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login: Optional[datetime] = None
+
+
+class UserListResponse(BaseModel):
+    """List of users response."""
+
+    users: list[UserResponse]
+    total_count: int
+
+
+class UpdateUserRequest(BaseModel):
+    """Update user request (admin only)."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    role: Optional[str] = Field(None, pattern="^(admin|employee|viewer)$")
+    is_active: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=8, max_length=128)

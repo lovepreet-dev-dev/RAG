@@ -9,9 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.api.deps import get_current_user, get_current_user_optional, require_role
 from app.models.schemas import (
     ChatRequest,
     ErrorResponse,
@@ -23,6 +24,7 @@ from app.models.schemas import (
     StatsResponse,
     UploadResponse,
 )
+from app.models.user import Role, User
 from app.services.dependencies import get_rag_service
 from app.utils.helpers import is_supported_file, safe_filename
 from app.utils.logging import get_logger
@@ -51,7 +53,10 @@ def _get_upload_dir() -> Path:
     summary="Upload a document",
     responses={400: {"model": ErrorResponse}, 413: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
-async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_role(Role.ADMIN, Role.EMPLOYEE)),
+) -> UploadResponse:
     """Upload a document file for later ingestion.
 
     Supported formats: PDF, TXT, DOCX, Markdown, HTML, CSV, JSON.
@@ -110,7 +115,10 @@ async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
     summary="Ingest documents into the vector store",
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
-def ingest_documents(request: IngestRequest) -> IngestResponse:
+def ingest_documents(
+    request: IngestRequest,
+    current_user: User = Depends(require_role(Role.ADMIN)),
+) -> IngestResponse:
     """Ingest uploaded files: extract text, chunk, embed, and store.
 
     Returns:
@@ -148,7 +156,10 @@ def ingest_documents(request: IngestRequest) -> IngestResponse:
     summary="Query the RAG system",
     responses={500: {"model": ErrorResponse}},
 )
-def query_rag(request: QueryRequest) -> QueryResponse:
+def query_rag(
+    request: QueryRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+) -> QueryResponse:
     """Ask a question and get an answer with sources.
 
     Returns:
@@ -167,10 +178,14 @@ def query_rag(request: QueryRequest) -> QueryResponse:
 
 @router.post(
     "/chat",
+    response_model=None,
     summary="Chat with the RAG system (supports streaming)",
     responses={500: {"model": ErrorResponse}},
 )
-async def chat_rag(request: ChatRequest) -> Union[QueryResponse, StreamingResponse]:
+async def chat_rag(
+    request: ChatRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+) -> Union[QueryResponse, StreamingResponse]:
     """Conversational endpoint with memory and optional streaming.
 
     Set ``stream=true`` in the request to receive Server-Sent Events.
@@ -231,7 +246,10 @@ def list_documents() -> dict:  # type: ignore[type-arg]
     summary="Delete a document by ID",
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
-def delete_document(document_id: str) -> dict[str, str]:
+def delete_document(
+    document_id: str,
+    current_user: User = Depends(require_role(Role.ADMIN)),
+) -> dict[str, str]:
     """Delete a document and all its chunks from the vector store.
 
     Returns:
@@ -294,6 +312,7 @@ def submit_feedback(
     query_id: str = Query(..., min_length=1),
     rating: int = Query(..., ge=1, le=5),
     comment: Optional[str] = Query(default=None, max_length=2000),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> dict[str, object]:
     """Record user feedback for a specific query response.
 

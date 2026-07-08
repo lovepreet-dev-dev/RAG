@@ -508,6 +508,19 @@ class Settings(BaseSettings):
         le=1440,
         description="JWT token lifetime in minutes.",
     )
+    refresh_token_expire_days: int = Field(
+        default=7,
+        ge=1,
+        le=90,
+        description="Refresh token lifetime in days.",
+    )
+
+    # ── Database ─────────────────────────────────────────────────────────
+
+    database_url: str = Field(
+        default="sqlite:///./data/rag.db",
+        description="SQLAlchemy database URL (SQLite or PostgreSQL).",
+    )
 
     # ── Data Paths ───────────────────────────────────────────────────────
 
