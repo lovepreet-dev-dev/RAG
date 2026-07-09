@@ -187,3 +187,23 @@ class BaseVectorStore(VectorStore, ABC):
         ]
         store.add_documents(docs)
         return store
+
+    def list_documents(self) -> list[dict[str, Any]]:
+        """List all unique documents in the store.
+
+        Returns a list of dicts with keys: document_id, filename, total_chunks,
+        total_pages. Default implementation returns empty list; override in
+        subclasses that maintain a docstore.
+        """
+        return []
+
+    def get_document_content(self, document_id: str) -> list[Document]:
+        """Get all chunks for a specific document.
+
+        Args:
+            document_id: The document ID to retrieve.
+
+        Returns:
+            List of Document objects belonging to that document.
+        """
+        return []

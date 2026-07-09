@@ -14,9 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.settings import router as settings_router
+from app.api.chat_history import router as chat_history_router
 from app.api.routes import router
 from app.config.constants import APP_DESCRIPTION, APP_TITLE, APP_VERSION
 from app.config.settings import get_settings
+from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.models.database import init_db
 from app.utils.logging import get_logger, setup_logging
 
@@ -110,6 +113,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Security middleware
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(
+        RateLimitMiddleware,
+        max_requests=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window,
+    )
+
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Catch-all exception handler for unhandled errors.
@@ -135,6 +146,8 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(settings_router, prefix="/api/v1")
+    app.include_router(chat_history_router, prefix="/api/v1")
     app.include_router(router, prefix="/api/v1")
 
     return app

@@ -36,6 +36,7 @@ from app.services.auth_service import (
     update_user,
     user_to_response,
 )
+from app.utils.audit import log_audit
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -57,15 +58,29 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
             detail="Invalid email or password",
         )
 
+    # Capture values before commit (which expires the identity)
+    user_id = user.id
+    user_role = user.role.value
+
     # Update last login
     user.last_login = datetime.now(timezone.utc)
     db.commit()
 
     # Generate tokens
-    access_token = create_access_token(user.id, user.role.value)
-    refresh_token = create_refresh_token(user.id, db)
+    access_token = create_access_token(user_id, user_role)
+    refresh_token = create_refresh_token(user_id, db)
 
     settings = get_settings()
+
+    log_audit(
+        db,
+        user_id=user.id,
+        action="login",
+        resource_type="user",
+        resource_id=user.id,
+        ip_address=request.client.host if request.client else "unknown",
+        user_agent=request.headers.get("user-agent", ""),
+    )
 
     logger.info(
         "user_login",
@@ -110,6 +125,15 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+    log_audit(
+        db,
+        user_id=user.id,
+        action="register",
+        resource_type="user",
+        resource_id=user.id,
+        details=f"role={body.role}",
+    )
 
     return user_to_response(user)
 
@@ -156,12 +180,24 @@ def refresh_token(body: RefreshTokenRequest, db: Session = Depends(get_db)):
             detail="User not found or deactivated",
         )
 
+    # Capture values before operations that commit
+    user_id_val = user.id
+    user_role_val = user.role.value
+
     # Revoke old refresh token (rotation)
     revoke_refresh_token(db, body.refresh_token)
 
     # Generate new tokens
-    access_token = create_access_token(user.id, user.role.value)
-    refresh_token = create_refresh_token(user.id, db)
+    access_token = create_access_token(user_id_val, user_role_val)
+    refresh_token = create_refresh_token(user_id_val, db)
+
+    log_audit(
+        db,
+        user_id=user.id,
+        action="token_refresh",
+        resource_type="user",
+        resource_id=user.id,
+    )
 
     return TokenResponse(
         access_token=access_token,
@@ -190,6 +226,7 @@ def logout(
 ):
     """Logout by revoking the refresh token."""
     revoke_refresh_token(db, body.refresh_token)
+    log_audit(db, user_id=current_user.id, action="logout", resource_type="user", resource_id=current_user.id)
     logger.info("user_logout", user_id=current_user.id)
     return {"message": "Successfully logged out"}
 
@@ -219,6 +256,8 @@ def change_password(
 
     # Revoke all refresh tokens for security
     revoke_all_refresh_tokens(db, current_user.id)
+
+    log_audit(db, user_id=current_user.id, action="change_password", resource_type="user", resource_id=current_user.id)
 
     logger.info("password_changed", user_id=current_user.id)
     return {"message": "Password changed successfully"}
@@ -277,6 +316,15 @@ def create_user_endpoint(
             detail=str(e),
         )
 
+    log_audit(
+        db,
+        user_id=current_user.id,
+        action="create_user",
+        resource_type="user",
+        resource_id=user.id,
+        details=f"email={body.email}, role={body.role}",
+    )
+
     return user_to_response(user)
 
 
@@ -317,6 +365,15 @@ def update_user_endpoint(
             detail="User not found",
         )
 
+    log_audit(
+        db,
+        user_id=current_user.id,
+        action="update_user",
+        resource_type="user",
+        resource_id=user_id,
+        details=f"name={body.name}, role={body.role}, is_active={body.is_active}",
+    )
+
     return user_to_response(user)
 
 
@@ -348,6 +405,15 @@ def delete_user_endpoint(
 
     db.delete(user)
     db.commit()
+
+    log_audit(
+        db,
+        user_id=current_user.id,
+        action="delete_user",
+        resource_type="user",
+        resource_id=user_id,
+        details=f"email={user.email}",
+    )
 
     logger.info("user_deleted", user_id=user_id, deleted_by=current_user.id)
     return {"message": "User deleted successfully"}

@@ -405,14 +405,16 @@ class RAGService:
         Returns:
             List of ``IngestedDocument`` summaries.
         """
-        count = self.vector_store.get_document_count()
+        doc_list = self.vector_store.list_documents()
         return [
             IngestedDocument(
-                document_id="all",
-                filename="indexed_documents",
-                total_chunks=count,
-                total_pages=0,
+                document_id=doc["document_id"],
+                filename=doc["filename"],
+                total_chunks=doc["total_chunks"],
+                total_pages=doc.get("total_pages", 0),
+                created_at=doc.get("created_at"),
             )
+            for doc in doc_list
         ]
 
     def get_health(self) -> HealthResponse:

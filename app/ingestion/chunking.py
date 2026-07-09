@@ -10,7 +10,8 @@ from __future__ import annotations
 from typing import Optional
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter, SemanticChunker
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config.constants import (
     CHUNK_SEPARATORS_RECURSIVE,
@@ -20,6 +21,31 @@ from app.config.settings import ChunkingStrategy, Settings, get_settings
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# ── SemanticChunker cache ──────────────────────────────────────────────
+# Avoids reconstructing the splitter on every call.
+_semantic_chunker_cache: dict[str, SemanticChunker] = {}
+
+
+def _get_semantic_chunker(settings: Settings) -> SemanticChunker:
+    """Return a cached SemanticChunker instance for the given settings."""
+    from app.embeddings.factory import get_embeddings_model
+
+    cache_key = f"{settings.embedding_model}_{settings.semantic_chunk_threshold}"
+    if cache_key not in _semantic_chunker_cache:
+        embeddings = get_embeddings_model(settings)
+        _semantic_chunker_cache[cache_key] = SemanticChunker(
+            embeddings=embeddings,
+            breakpoint_threshold_type="percentile",
+            breakpoint_threshold_amount=settings.semantic_chunk_threshold,
+        )
+    return _semantic_chunker_cache[cache_key]
+
+
+def _is_valid_chunk(text: str, min_length: int = 10) -> bool:
+    """Return True if the chunk text is non-empty and meets min_length."""
+    stripped = text.strip()
+    return bool(stripped) and len(stripped) >= min_length
 
 
 def chunk_documents(
@@ -73,7 +99,32 @@ def chunk_documents(
         raise ValueError(f"Unknown chunking strategy: {strategy}")
 
     chunks = chunker_fn(documents, chunk_size, chunk_overlap, settings)
-    logger.info("chunking_complete", total_chunks=len(chunks))
+
+    # --- Filter invalid chunks (empty, whitespace-only, too short) ---
+    min_len = settings.min_chunk_length if hasattr(settings, "min_chunk_length") else 10
+    valid_chunks: list[Document] = []
+    for chunk in chunks:
+        if _is_valid_chunk(chunk.page_content, min_len):
+            valid_chunks.append(chunk)
+
+    filtered = len(chunks) - len(valid_chunks)
+    if filtered > 0:
+        logger.info(
+            "chunks_filtered",
+            total=len(chunks),
+            valid=len(valid_chunks),
+            removed=filtered,
+        )
+
+    logger.info("chunking_complete", total_chunks=len(valid_chunks))
+    return valid_chunks
+
+
+def _assign_global_ids(chunks: list[Document], doc_id: str) -> list[Document]:
+    """Assign globally unique chunk IDs using document_id + sequential index."""
+    for idx, chunk in enumerate(chunks):
+        chunk.metadata["chunk_id"] = f"{doc_id}_{idx:04d}"
+        chunk.metadata["total_chunks"] = len(chunks)
     return chunks
 
 
@@ -103,14 +154,16 @@ def _recursive_chunk(
         separators=CHUNK_SEPARATORS_RECURSIVE,
         keep_separator=True,
     )
-    chunks: list[Document] = []
+    all_chunks: list[Document] = []
     for doc in documents:
+        doc_id = doc.metadata.get("document_id", "unknown")
         splits = splitter.split_documents([doc])
+        # Assign globally unique IDs per document
         for i, split in enumerate(splits):
-            split.metadata["chunk_id"] = i
+            split.metadata["chunk_id"] = f"{doc_id}_{i:04d}"
             split.metadata["total_chunks"] = len(splits)
-            chunks.append(split)
-    return chunks
+        all_chunks.extend(splits)
+    return all_chunks
 
 
 def _semantic_chunk(
@@ -122,6 +175,7 @@ def _semantic_chunk(
     """Split using ``SemanticChunker`` based on embedding similarity.
 
     Groups sentences that are semantically similar into the same chunk.
+    Uses a cached SemanticChunker instance.
 
     Args:
         documents: Documents to split.
@@ -132,22 +186,16 @@ def _semantic_chunk(
     Returns:
         List of semantically chunked Documents.
     """
-    from app.embeddings.factory import get_embeddings_model
-
-    embeddings = get_embeddings_model(settings)
-    splitter = SemanticChunker(
-        embeddings=embeddings,
-        breakpoint_threshold_type="percentile",
-        breakpoint_threshold_amount=settings.semantic_chunk_threshold,
-    )
-    chunks: list[Document] = []
+    splitter = _get_semantic_chunker(settings)
+    all_chunks: list[Document] = []
     for doc in documents:
+        doc_id = doc.metadata.get("document_id", "unknown")
         splits = splitter.split_documents([doc])
         for i, split in enumerate(splits):
-            split.metadata["chunk_id"] = i
+            split.metadata["chunk_id"] = f"{doc_id}_{i:04d}"
             split.metadata["total_chunks"] = len(splits)
-            chunks.append(split)
-    return chunks
+        all_chunks.extend(splits)
+    return all_chunks
 
 
 def _sliding_window_chunk(
@@ -174,11 +222,18 @@ def _sliding_window_chunk(
         separators=CHUNK_SEPARATORS_SLIDING,
         keep_separator=True,
     )
-    chunks: list[Document] = []
+    all_chunks: list[Document] = []
     for doc in documents:
+        doc_id = doc.metadata.get("document_id", "unknown")
         splits = splitter.split_documents([doc])
         for i, split in enumerate(splits):
-            split.metadata["chunk_id"] = i
+            split.metadata["chunk_id"] = f"{doc_id}_{i:04d}"
             split.metadata["total_chunks"] = len(splits)
-            chunks.append(split)
-    return chunks
+        all_chunks.extend(splits)
+    return all_chunks
+
+
+def reset_semantic_chunker_cache() -> None:
+    """Reset the SemanticChunker cache.  Useful for tests."""
+    global _semantic_chunker_cache
+    _semantic_chunker_cache.clear()

@@ -252,6 +252,34 @@ class Settings(BaseSettings):
         le=1.0,
         description="Percentile breakpoint for semantic chunking.",
     )
+    min_chunk_length: int = Field(
+        default=10,
+        ge=0,
+        description="Minimum character length for chunks to be kept.",
+    )
+
+    # ── Ingestion ────────────────────────────────────────────────────────
+
+    enable_ocr: bool = Field(
+        default=False,
+        description="Enable OCR fallback for PDFs with no extractable text.",
+    )
+    ocr_language: str = Field(
+        default="eng",
+        description="Tesseract OCR language code (e.g. 'eng', 'fra').",
+    )
+    csv_batch_size: int = Field(
+        default=500,
+        ge=10,
+        le=5000,
+        description="Number of rows per batch when ingesting large CSV files.",
+    )
+    json_batch_size: int = Field(
+        default=500,
+        ge=10,
+        le=5000,
+        description="Number of items per batch when ingesting large JSON arrays.",
+    )
 
     # ── Retrieval ────────────────────────────────────────────────────────
 

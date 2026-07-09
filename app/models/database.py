@@ -34,14 +34,24 @@ def _get_engine():
         database_url = settings.database_url
 
         connect_args = {}
+        pool_kwargs = {
+            "pool_pre_ping": True,
+        }
+
         if database_url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+        else:
+            # PostgreSQL connection pooling
+            pool_kwargs["pool_size"] = 10
+            pool_kwargs["max_overflow"] = 20
+            pool_kwargs["pool_timeout"] = 30
+            pool_kwargs["pool_recycle"] = 1800
 
         _engine = create_engine(
             database_url,
             connect_args=connect_args,
-            pool_pre_ping=True,
             echo=settings.debug,
+            **pool_kwargs,
         )
 
         # Enable WAL mode for SQLite

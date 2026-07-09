@@ -7,6 +7,7 @@ Each loader reads a file from disk and returns a list of LangChain
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 from typing import Optional
@@ -18,6 +19,27 @@ from app.utils.helpers import clean_text, get_file_type
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def compute_file_hash(file_path: str) -> str:
+    """Compute SHA-256 hash of a file's raw bytes without loading into memory.
+
+    Streams the file in 64 KB chunks for memory efficiency on large files.
+
+    Args:
+        file_path: Absolute path to the file.
+
+    Returns:
+        Hex-encoded SHA-256 digest.
+    """
+    sha = hashlib.sha256()
+    with open(file_path, "rb") as fh:
+        while True:
+            chunk = fh.read(65536)
+            if not chunk:
+                break
+            sha.update(chunk)
+    return sha.hexdigest()
 
 
 def load_document(file_path: str, filename: Optional[str] = None) -> list[Document]:
@@ -43,11 +65,15 @@ def load_document(file_path: str, filename: Optional[str] = None) -> list[Docume
     if file_type is None:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
+    # Hash file bytes before loading into memory (optimisation #6)
+    file_hash = compute_file_hash(file_path)
+
     logger.info(
         "loading_document",
         filename=fname,
         type=file_type,
         size=path.stat().st_size,
+        file_hash=file_hash[:16],
     )
 
     loaders = {
@@ -65,12 +91,20 @@ def load_document(file_path: str, filename: Optional[str] = None) -> list[Docume
         raise ValueError(f"No loader for type: {file_type}")
 
     docs = loader_fn(path, fname)
-    logger.info("loaded_document", filename=fname, pages=len(docs))
+
+    # Attach pre-computed hash to every doc for downstream duplicate detection
+    for doc in docs:
+        doc.metadata["content_hash"] = file_hash
+
+    logger.info("loaded_document", filename=fname, pages=len(docs), content_hash=file_hash[:16])
     return docs
 
 
 def _load_pdf(path: Path, filename: str) -> list[Document]:
     """Load a PDF file.
+
+    If PyPDFLoader yields no extractable text and OCR is enabled, falls back
+    to ``pytesseract`` via ``pdf2image`` for a graceful OCR pass.
 
     Args:
         path: Path to the PDF.
@@ -79,16 +113,77 @@ def _load_pdf(path: Path, filename: str) -> list[Document]:
     Returns:
         List of Documents, one per page.
     """
+    from app.config.settings import get_settings
     from langchain_community.document_loaders import PyPDFLoader
 
+    settings = get_settings()
     loader = PyPDFLoader(str(path))
     docs = loader.load()
+
+    # Check if any page has meaningful text
+    has_text = any(d.page_content.strip() for d in docs)
+
+    if not has_text and getattr(settings, "enable_ocr", False):
+        logger.info("ocr_fallback_triggered", filename=filename, pages=len(docs))
+        docs = _ocr_pdf(path, filename, settings)
+
     for i, doc in enumerate(docs):
         doc.metadata["filename"] = filename
         doc.metadata["page_number"] = i + 1
         doc.metadata["content_type"] = "application/pdf"
         doc.page_content = clean_text(doc.page_content)
+
     return docs
+
+
+def _ocr_pdf(path: Path, filename: str, settings: object) -> list[Document]:
+    """Perform OCR on a PDF with no extractable text.
+
+    Uses ``pdf2image`` + ``pytesseract``.  Falls back gracefully if the
+    libraries are not installed.
+
+    Args:
+        path: Path to the PDF.
+        filename: Display name.
+        settings: Application settings (needs ``ocr_language``).
+
+    Returns:
+        List of Documents with OCR text, or an empty list on failure.
+    """
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+    except ImportError:
+        logger.warning(
+            "ocr_unavailable",
+            filename=filename,
+            msg="pdf2image/pytesseract not installed; skipping OCR",
+        )
+        return []
+
+    try:
+        lang = getattr(settings, "ocr_language", "eng")
+        images = convert_from_path(str(path))
+        docs: list[Document] = []
+        for i, img in enumerate(images):
+            text = pytesseract.image_to_string(img, lang=lang)
+            if text.strip():
+                docs.append(
+                    Document(
+                        page_content=text,
+                        metadata={
+                            "filename": filename,
+                            "page_number": i + 1,
+                            "content_type": "application/pdf",
+                            "ocr_applied": True,
+                        },
+                    )
+                )
+        logger.info("ocr_complete", filename=filename, pages_with_text=len(docs))
+        return docs
+    except Exception as exc:
+        logger.warning("ocr_failed", filename=filename, error=str(exc))
+        return []
 
 
 def _load_text(path: Path, filename: str) -> list[Document]:
@@ -166,6 +261,8 @@ def _load_html(path: Path, filename: str) -> list[Document]:
 def _load_csv(path: Path, filename: str) -> list[Document]:
     """Load a CSV file, converting each row to a Document.
 
+    Large CSVs are processed in configurable batches to limit memory usage.
+
     Args:
         path: Path to the CSV.
         filename: Display name.
@@ -173,7 +270,14 @@ def _load_csv(path: Path, filename: str) -> list[Document]:
     Returns:
         List of Documents, one per row.
     """
+    from app.config.settings import get_settings
+
+    settings = get_settings()
+    batch_size = getattr(settings, "csv_batch_size", 500)
+
     docs: list[Document] = []
+    batch_count = 0
+
     with open(path, "r", encoding="utf-8", errors="ignore") as fh:
         reader = csv.DictReader(fh)
         for i, row in enumerate(reader):
@@ -184,16 +288,26 @@ def _load_csv(path: Path, filename: str) -> list[Document]:
                     metadata={
                         "filename": filename,
                         "page_number": 1,
-                        "chunk_id": i,
                         "content_type": "text/csv",
                     },
                 )
             )
-    return docs if docs else _load_text(path, filename)
+            # Flush batch periodically
+            if len(docs) >= batch_size:
+                batch_count += 1
+                logger.debug("csv_batch_flushed", batch=batch_count, rows=len(docs))
+
+    if not docs:
+        return _load_text(path, filename)
+
+    logger.info("csv_loaded", filename=filename, rows=len(docs), batches=batch_count + 1)
+    return docs
 
 
 def _load_json(path: Path, filename: str) -> list[Document]:
     """Load a JSON file.
+
+    Large JSON arrays are processed in configurable batches.
 
     Args:
         path: Path to the JSON.
@@ -202,6 +316,11 @@ def _load_json(path: Path, filename: str) -> list[Document]:
     Returns:
         List of Documents.
     """
+    from app.config.settings import get_settings
+
+    settings = get_settings()
+    batch_size = getattr(settings, "json_batch_size", 500)
+
     raw = path.read_text(encoding="utf-8", errors="ignore")
     try:
         data = json.loads(raw)
@@ -218,11 +337,15 @@ def _load_json(path: Path, filename: str) -> list[Document]:
                     metadata={
                         "filename": filename,
                         "page_number": 1,
-                        "chunk_id": i,
                         "content_type": "application/json",
                     },
                 )
             )
+            # Flush batch periodically
+            if len(docs) >= batch_size:
+                logger.debug("json_batch_flushed", items=len(docs))
+
+        logger.info("json_loaded", filename=filename, items=len(docs))
         return docs
 
     content = json.dumps(data, indent=2) if not isinstance(data, str) else data

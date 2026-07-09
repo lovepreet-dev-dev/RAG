@@ -11,8 +11,9 @@ from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_current_user_optional, require_role
+from app.api.deps import get_current_user, get_current_user_optional, get_db, require_role
 from app.models.schemas import (
     ChatRequest,
     ErrorResponse,
@@ -275,6 +276,110 @@ def delete_document(
 
 
 @router.get(
+    "/documents/{document_id}/content",
+    summary="Get document content",
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+def get_document_content(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Get the full text content of a document, split into pages/chunks.
+
+    Returns:
+        Dict with document_id, filename, and pages list.
+    """
+    service = get_rag_service()
+    try:
+        chunks = service.vector_store.get_document_content(document_id)
+        if not chunks:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document '{document_id}' not found or has no content.",
+            )
+
+        # Group chunks by page
+        pages: dict[int, list[str]] = {}
+        filename = ""
+        for chunk in chunks:
+            page = chunk.metadata.get("page_number", 0)
+            if page not in pages:
+                pages[page] = []
+            pages[page].append(chunk.page_content)
+            if not filename:
+                filename = chunk.metadata.get("filename", "")
+
+        # Combine chunks per page
+        page_contents = []
+        for page_num in sorted(pages.keys()):
+            page_contents.append({
+                "page_number": page_num,
+                "content": "\n\n".join(pages[page_num]),
+            })
+
+        return {
+            "document_id": document_id,
+            "filename": filename,
+            "total_pages": len(page_contents),
+            "total_chunks": len(chunks),
+            "pages": page_contents,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_document_content_failed", document_id=document_id, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Failed to get document content: {exc}")
+
+
+@router.get(
+    "/documents/{document_id}/download",
+    summary="Download original document file",
+    responses={404: {"model": ErrorResponse}},
+)
+def download_document(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Download the original uploaded file.
+
+    Returns:
+        File response with the original document.
+    """
+    from fastapi.responses import FileResponse
+
+    service = get_rag_service()
+    try:
+        # Get filename from vector store
+        chunks = service.vector_store.get_document_content(document_id)
+        if not chunks:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document '{document_id}' not found.",
+            )
+
+        filename = chunks[0].metadata.get("filename", "unknown")
+        upload_dir = _get_upload_dir()
+        file_path = upload_dir / filename
+
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Original file '{filename}' not found on disk.",
+            )
+
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="application/octet-stream",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("download_failed", document_id=document_id, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Download failed: {exc}")
+
+
+@router.get(
     "/health",
     response_model=HealthResponse,
     summary="Health check",
@@ -300,8 +405,17 @@ def get_stats() -> StatsResponse:
     Returns:
         StatsResponse with usage metrics.
     """
+    from app.utils.cache import get_cache
+
+    cache = get_cache()
+    cached_stats = cache.get("stats")
+    if cached_stats:
+        return StatsResponse(**cached_stats)
+
     service = get_rag_service()
-    return service.get_stats()
+    stats = service.get_stats()
+    cache.set("stats", stats.model_dump(), ttl=30)
+    return stats
 
 
 @router.post(
@@ -313,16 +427,29 @@ def submit_feedback(
     rating: int = Query(..., ge=1, le=5),
     comment: Optional[str] = Query(default=None, max_length=2000),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Record user feedback for a specific query response.
 
     Returns:
         Confirmation dict with query_id and rating.
     """
+    from app.models.user import Feedback
+
+    feedback = Feedback(
+        query_id=query_id,
+        user_id=current_user.id if current_user else None,
+        rating=rating,
+        comment=comment,
+    )
+    db.add(feedback)
+    db.commit()
+
     logger.info(
         "feedback_received",
         query_id=query_id,
         rating=rating,
         comment=comment,
+        user_id=current_user.id if current_user else None,
     )
     return {"message": "Feedback recorded.", "query_id": query_id, "rating": rating}

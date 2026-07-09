@@ -53,16 +53,19 @@ def create_access_token(user_id: str, role: str) -> str:
 
 def create_refresh_token(user_id: str, db: Session) -> str:
     """Create a refresh token and store it in the database."""
+    import uuid
+
     settings = get_settings()
     now = datetime.now(timezone.utc)
     expire = now + timedelta(days=settings.refresh_token_expire_days)
 
-    # Generate the token
+    # Generate the token (include jti for uniqueness)
     payload = {
         "sub": user_id,
         "type": "refresh",
         "exp": expire,
         "iat": now,
+        "jti": str(uuid.uuid4()),
         "iss": "rag-engine",
     }
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
@@ -207,8 +210,13 @@ def is_refresh_token_valid(db: Session, token: str) -> bool:
     if not db_token:
         return False
 
-    # Check expiration
-    if db_token.expires_at < datetime.now(timezone.utc):
+    # Check expiration - handle both naive and aware datetimes
+    expires_at = db_token.expires_at
+    now = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        # Make naive datetime timezone-aware (assume UTC)
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now:
         db_token.is_revoked = True
         db.commit()
         return False

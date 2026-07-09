@@ -274,6 +274,60 @@ class FAISSVectorStore(BaseVectorStore):
             }
         logger.info("faiss_loaded", path=str(dir_path), doc_count=len(self._docstore))
 
+    def list_documents(self) -> list[dict[str, Any]]:
+        """List all unique documents in the store.
+
+        Returns a list of dicts with keys: document_id, filename, total_chunks,
+        total_pages, created_at.
+        """
+        doc_groups: dict[str, dict[str, Any]] = {}
+
+        for doc in self._docstore.values():
+            meta = doc.metadata
+            doc_id = meta.get("document_id", "unknown")
+            if doc_id not in doc_groups:
+                doc_groups[doc_id] = {
+                    "document_id": doc_id,
+                    "filename": meta.get("filename", "unknown"),
+                    "total_chunks": 0,
+                    "total_pages": set(),
+                    "created_at": meta.get("created_at"),
+                }
+            doc_groups[doc_id]["total_chunks"] += 1
+            page = meta.get("page_number")
+            if page is not None:
+                doc_groups[doc_id]["total_pages"].add(page)
+
+        result = []
+        for doc_id, info in doc_groups.items():
+            info["total_pages"] = len(info["total_pages"]) if info["total_pages"] else 0
+            result.append(info)
+
+        return sorted(result, key=lambda x: x.get("created_at") or "", reverse=True)
+
+    def get_document_content(self, document_id: str) -> list[Document]:
+        """Get all chunks for a specific document.
+
+        Args:
+            document_id: The document ID to retrieve.
+
+        Returns:
+            List of Document objects belonging to that document, sorted by page/chunk.
+        """
+        chunks = []
+        for doc in self._docstore.values():
+            if doc.metadata.get("document_id") == document_id:
+                chunks.append(doc)
+
+        # Sort by page number then chunk_id
+        def sort_key(d: Document) -> tuple[int, int]:
+            return (
+                d.metadata.get("page_number", 0),
+                d.metadata.get("chunk_id", 0),
+            )
+
+        return sorted(chunks, key=sort_key)
+
     # ---- Private helpers ----
 
     @staticmethod
