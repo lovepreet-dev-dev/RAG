@@ -195,7 +195,11 @@ def update_settings_endpoint(
     # Refresh the RAG service to pick up new settings
     try:
         from app.services.dependencies import get_rag_service
-        get_rag_service().refresh_settings()
+        # Collect all current DB settings as overrides
+        all_overrides = {}
+        for key in _DEFAULTS:
+            all_overrides[key] = _get_setting_value(db, key)
+        get_rag_service().refresh_settings(db_overrides=all_overrides)
     except Exception as exc:
         logger.warning("settings_refresh_failed", error=str(exc))
 

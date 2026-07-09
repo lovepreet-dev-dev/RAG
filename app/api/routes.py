@@ -122,8 +122,11 @@ def ingest_documents(
 ) -> IngestResponse:
     """Ingest uploaded files: extract text, chunk, embed, and store.
 
+    Supports both synchronous and background ingestion. When ``background=true``,
+    the job is queued and returns immediately with a job ID.
+
     Returns:
-        IngestResponse with document summaries.
+        IngestResponse with document summaries or job info.
 
     Raises:
         HTTPException: On missing files or ingestion failure.
@@ -136,6 +139,29 @@ def ingest_documents(
     if missing:
         names = [Path(p).name for p in missing]
         raise HTTPException(status_code=400, detail=f"Files not found: {names}")
+
+    # Background ingestion
+    if getattr(request, "background", False):
+        from app.jobs import get_job_queue, JobPriority
+        from app.jobs.tasks import ingest_documents_background
+
+        queue = get_job_queue()
+        job = queue.submit(
+            func=lambda: ingest_documents_background(
+                file_paths=file_paths,
+                chunking_strategy=request.chunking_strategy.value if request.chunking_strategy else None,
+                chunk_size=request.chunk_size,
+                chunk_overlap=request.chunk_overlap,
+            ),
+            job_type="ingestion",
+            priority=JobPriority.HIGH,
+            metadata={"filenames": request.filenames},
+        )
+        return IngestResponse(
+            documents=[],
+            total_chunks=0,
+            message=f"Ingestion job queued (job_id={job.id}). Check /api/v1/jobs/{job.id} for status.",
+        )
 
     try:
         return service.upload_and_ingest(
@@ -186,8 +212,13 @@ def query_rag(
 async def chat_rag(
     request: ChatRequest,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
 ) -> Union[QueryResponse, StreamingResponse]:
     """Conversational endpoint with memory and optional streaming.
+
+    Messages are persisted to the database for long-term retention.
+    When a session_id is provided, history is loaded from the database
+    instead of the in-memory cache.
 
     Set ``stream=true`` in the request to receive Server-Sent Events.
 
@@ -197,7 +228,30 @@ async def chat_rag(
     Raises:
         HTTPException: On chat failure.
     """
+    from app.memory.chat_store import (
+        get_or_create_session,
+        load_session_history,
+        persist_chat_response,
+        persist_message,
+    )
+
     service = get_rag_service()
+
+    # Resolve session: use DB-backed sessions when user is authenticated
+    session_id = request.session_id or generate_id()
+    use_db = current_user is not None
+
+    if use_db:
+        get_or_create_session(
+            db=db,
+            session_id=session_id,
+            user_id=current_user.id,
+            title=request.message[:80],
+        )
+        # Load history from database instead of in-memory dict
+        db_history = load_session_history(db=db, session_id=session_id)
+        # Temporarily inject DB history into the service's session cache
+        service._sessions[session_id] = db_history
 
     if request.stream:
         async def event_generator():  # type: ignore[no-untyped-def]
@@ -206,6 +260,24 @@ async def chat_rag(
                     data = chunk.model_dump_json()
                     yield f"data: {data}\n\n"
                 yield "data: [DONE]\n\n"
+
+                # Persist messages after stream completes
+                if use_db:
+                    persist_message(
+                        db=db,
+                        session_id=session_id,
+                        role="user",
+                        content=request.message,
+                    )
+                    # Get the full answer from the service's session history
+                    history = service._sessions.get(session_id, [])
+                    if history and history[-1]["role"] == "assistant":
+                        persist_message(
+                            db=db,
+                            session_id=session_id,
+                            role="assistant",
+                            content=history[-1]["content"],
+                        )
             except Exception as exc:
                 logger.error("streaming_chat_failed", error=str(exc))
                 import json
@@ -216,7 +288,18 @@ async def chat_rag(
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
     try:
-        return service.chat(request)
+        response = service.chat(request)
+
+        # Persist to database
+        if use_db:
+            persist_chat_response(
+                db=db,
+                session_id=session_id,
+                user_message=request.message,
+                response=response,
+            )
+
+        return response
     except Exception as exc:
         logger.error("chat_failed", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Chat failed: {exc}")
@@ -227,16 +310,31 @@ async def chat_rag(
     summary="List indexed documents",
     responses={500: {"model": ErrorResponse}},
 )
-def list_documents() -> dict:  # type: ignore[type-arg]
-    """Return a summary of all indexed documents.
+def list_documents(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
+) -> dict:  # type: ignore[type-arg]
+    """Return a summary of all indexed documents with pagination.
 
     Returns:
-        Dict with ``documents`` list and ``total_count``.
+        Dict with ``documents`` list, ``total_count``, and pagination info.
     """
     service = get_rag_service()
     try:
         docs = service.get_documents()
-        return {"documents": [d.model_dump() for d in docs], "total_count": len(docs)}
+        total = len(docs)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_docs = docs[start:end]
+
+        return {
+            "data": [d.model_dump() for d in page_docs],
+            "total_count": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     except Exception as exc:
         logger.error("list_documents_failed", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Failed to list documents: {exc}")
@@ -453,3 +551,90 @@ def submit_feedback(
         user_id=current_user.id if current_user else None,
     )
     return {"message": "Feedback recorded.", "query_id": query_id, "rating": rating}
+
+
+# ── Background Job Endpoints ────────────────────────────────────────────
+
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Get background job status",
+    responses={404: {"model": ErrorResponse}},
+)
+def get_job_status(
+    job_id: str,
+    current_user: User = Depends(require_role(Role.ADMIN)),
+) -> dict:
+    """Get the status of a background job."""
+    from app.jobs import get_job_queue
+
+    queue = get_job_queue()
+    job = queue.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    return {
+        "id": job.id,
+        "job_type": job.job_type,
+        "status": job.status.value,
+        "priority": job.priority.value,
+        "progress": job.progress,
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "result": job.result,
+        "error": job.error,
+        "metadata": job.metadata,
+    }
+
+
+@router.get(
+    "/jobs",
+    summary="List background jobs",
+)
+def list_jobs(
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: User = Depends(require_role(Role.ADMIN)),
+) -> dict:
+    """List background jobs, optionally filtered by status."""
+    from app.jobs import get_job_queue, JobStatus
+
+    queue = get_job_queue()
+    job_status = JobStatus(status) if status else None
+    jobs = queue.list_jobs(status=job_status, limit=limit)
+
+    return {
+        "jobs": [
+            {
+                "id": j.id,
+                "job_type": j.job_type,
+                "status": j.status.value,
+                "created_at": j.created_at.isoformat(),
+                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            }
+            for j in jobs
+        ],
+        "total_count": len(jobs),
+    }
+
+
+@router.post(
+    "/jobs/{job_id}/cancel",
+    responses={404: {"model": ErrorResponse}},
+)
+def cancel_job(
+    job_id: str,
+    current_user: User = Depends(require_role(Role.ADMIN)),
+) -> dict:
+    """Cancel a pending background job."""
+    from app.jobs import get_job_queue
+
+    queue = get_job_queue()
+    success = queue.cancel_job(job_id)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job '{job_id}' not found or not cancellable",
+        )
+    return {"message": f"Job '{job_id}' cancelled", "job_id": job_id}

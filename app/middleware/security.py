@@ -1,11 +1,13 @@
 """Security middleware for rate limiting and request protection.
 
-Provides in-memory rate limiting per IP address.
+Provides in-memory rate limiting per IP address, security headers,
+and request tracing.
 """
 
 from __future__ import annotations
 
 import time
+import uuid
 from collections import defaultdict
 from typing import Callable
 
@@ -89,21 +91,79 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Adds security headers to responses."""
+    """Adds security headers to responses.
+
+    Headers added:
+    - X-Content-Type-Options: nosniff
+    - X-Frame-Options: DENY
+    - Referrer-Policy: strict-origin-when-cross-origin
+    - Content-Security-Policy: default-src 'self'
+    - Strict-Transport-Security: max-age=31536000 (production only)
+    """
+
+    def __init__(self, app, enable_hsts: bool = False):
+        super().__init__(app)
+        self.enable_hsts = enable_hsts
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         response = await call_next(request)
 
-        # Security headers
+        # Core security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Content Security Policy — restrict resource loading
+        csp_directives = [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+        ]
+        response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+
+        # HSTS — only in production with HTTPS
+        if self.enable_hsts:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains; preload"
+            )
 
         # Remove server header
         if "server" in response.headers:
             del response.headers["server"]
+
+        # Remove potentially leaking headers
+        for header in ["x-powered-by", "x-aspnet-version", "x-aspnetmvc-version"]:
+            if header in response.headers:
+                del response.headers[header]
+
+        return response
+
+
+class RequestTracingMiddleware(BaseHTTPMiddleware):
+    """Adds a unique request ID to every request/response for tracing.
+
+    The request ID is returned in the X-Request-ID header and can be used
+    to correlate logs and debug issues across services.
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        # Use existing request ID or generate a new one
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+
+        # Store on request state for access in handlers
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
 
         return response

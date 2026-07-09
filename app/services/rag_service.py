@@ -71,21 +71,86 @@ class RAGService:
 
         self._sessions: dict[str, list[dict[str, str]]] = {}
 
-    def refresh_settings(self) -> None:
-        """Refresh settings from the environment.
+    def refresh_settings(self, db_overrides: dict[str, str] | None = None) -> None:
+        """Refresh settings from the environment and optional DB overrides.
 
         Call this after settings are updated via the API to pick up changes.
         Resets cached components that depend on settings.
+
+        Args:
+            db_overrides: Optional dict of key-value overrides from the database
+                settings API. These take precedence over env vars.
         """
         from app.config.settings import get_settings
 
         self._settings = get_settings()
+
+        # Apply DB overrides to the settings object
+        if db_overrides:
+            self._apply_db_overrides(db_overrides)
+
         # Reset cached components that depend on settings
         self._pipeline = None
         self._retriever = None
         self._reranker = None
         self._validator = None
-        logger.info("rag_service_settings_refreshed")
+        logger.info("rag_service_settings_refreshed", overrides=list(db_overrides or []))
+
+    def _apply_db_overrides(self, overrides: dict[str, str]) -> None:
+        """Apply database setting overrides to the settings object.
+
+        Args:
+            overrides: Dict of setting key-value pairs from the database.
+        """
+        bool_keys = {
+            "enable_mmr", "enable_hybrid_search", "enable_multi_query",
+            "enable_reranking", "enable_answer_validation",
+        }
+        int_keys = {
+            "similarity_top_k", "mmr_top_k", "hybrid_top_k",
+            "chunk_size", "chunk_overlap", "max_context_tokens", "rerank_top_k",
+        }
+        float_keys = {"score_threshold", "temperature"}
+        str_keys = {
+            "llm_provider", "openai_model", "anthropic_model", "gemini_model",
+            "embedding_model", "vector_store",
+        }
+
+        for key, value in overrides.items():
+            if key in bool_keys:
+                setattr(self._settings, key, value.lower() in ("true", "1", "yes"))
+            elif key in int_keys:
+                try:
+                    setattr(self._settings, key, int(value))
+                except (ValueError, TypeError):
+                    pass
+            elif key in float_keys:
+                try:
+                    setattr(self._settings, key, float(value))
+                except (ValueError, TypeError):
+                    pass
+            elif key in str_keys:
+                # Some str_keys are enums, handle them
+                if key == "llm_provider":
+                    try:
+                        from app.config.settings import LLMProvider
+                        self._settings.llm_provider = LLMProvider(value)
+                    except (ValueError, TypeError):
+                        pass
+                elif key == "embedding_model":
+                    try:
+                        from app.config.settings import EmbeddingModel
+                        self._settings.embedding_model = EmbeddingModel(value)
+                    except (ValueError, TypeError):
+                        pass
+                elif key == "vector_store":
+                    try:
+                        from app.config.settings import VectorStore
+                        self._settings.vector_store = VectorStore(value)
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    setattr(self._settings, key, value)
 
     @property
     def vector_store(self) -> BaseVectorStore:
@@ -434,18 +499,40 @@ class RAGService:
         ]
 
     def get_health(self) -> HealthResponse:
-        """Return system health status.
+        """Return system health status with component checks.
 
         Returns:
-            ``HealthResponse`` with component status.
+            HealthResponse with component status.
         """
-        return HealthResponse(
+        from app.config.constants import APP_VERSION
+
+        health = HealthResponse(
             status="healthy",
+            version=APP_VERSION,
             vector_store=self._settings.vector_store.value,
             embedding_model=self._settings.embedding_model.value,
             llm_provider=self._settings.llm_provider.value,
-            documents_indexed=self.vector_store.get_document_count(),
         )
+
+        # Check vector store
+        try:
+            docs = self.vector_store.list_documents()
+            health.documents_indexed = len(docs)
+        except Exception as exc:
+            logger.warning("health_check_vector_store_failed", error=str(exc))
+
+        # Check database connectivity
+        try:
+            from app.models.database import _get_session_factory
+            from sqlalchemy import text
+            SessionLocal = _get_session_factory()
+            db = SessionLocal()
+            db.execute(text("SELECT 1"))
+            db.close()
+        except Exception as exc:
+            logger.warning("health_check_database_failed", error=str(exc))
+
+        return health
 
     def get_stats(self) -> StatsResponse:
         """Return system statistics.

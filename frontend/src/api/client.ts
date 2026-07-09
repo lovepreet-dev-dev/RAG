@@ -152,6 +152,12 @@ export const authApi = {
     password: string;
     role?: string;
   }) => api.post<User>("/api/v1/auth/register", data).then((r) => r.data),
+
+  forgotPassword: (email: string) =>
+    api.post("/api/v1/auth/forgot-password", { email }).then((r) => r.data),
+
+  resetPassword: (token: string, newPassword: string) =>
+    api.post("/api/v1/auth/reset-password", { token, new_password: newPassword }).then((r) => r.data),
 };
 
 // ── Chat API ────────────────────────────────────────────────────────────────

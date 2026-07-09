@@ -82,11 +82,15 @@ class TestDocumentsEndpoint:
     """Tests for the documents listing endpoint."""
 
     def test_list_documents(self, client: TestClient) -> None:
-        """Should return a list of documents."""
+        """Should return a list of documents with pagination."""
         response = client.get("/api/v1/documents")
         assert response.status_code == 200
         data = response.json()
-        assert "documents" in data
+        assert "data" in data
+        assert "total_count" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert "total_pages" in data
 
 
 class TestDeleteDocumentEndpoint:

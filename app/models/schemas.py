@@ -90,6 +90,10 @@ class IngestRequest(BaseModel):
     chunking_strategy: Optional[ChunkingStrategyEnum] = None
     chunk_size: Optional[int] = Field(default=None, ge=50, le=8192)
     chunk_overlap: Optional[int] = Field(default=None, ge=0, le=2048)
+    background: bool = Field(
+        default=False,
+        description="If true, run ingestion in background and return job ID.",
+    )
 
 
 class QueryRequest(BaseModel):
@@ -260,6 +264,27 @@ class ErrorResponse(BaseModel):
 
     detail: str
     error_code: Optional[str] = None
+
+
+# ── Standard Response Envelope ────────────────────────────────────────────
+
+
+class PaginatedResponse(BaseModel):
+    """Standard paginated response envelope."""
+
+    data: list[Any] = Field(default_factory=list)
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 0
+
+
+class ApiResponse(BaseModel):
+    """Standard API response envelope."""
+
+    data: Any = None
+    message: Optional[str] = None
+    success: bool = True
 
 
 # ── Auth Schemas ───────────────────────────────────────────────────────

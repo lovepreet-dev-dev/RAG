@@ -19,7 +19,7 @@ from app.api.chat_history import router as chat_history_router
 from app.api.routes import router
 from app.config.constants import APP_DESCRIPTION, APP_TITLE, APP_VERSION
 from app.config.settings import get_settings
-from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.middleware.security import RateLimitMiddleware, SecurityHeadersMiddleware, RequestTracingMiddleware
 from app.models.database import init_db
 from app.utils.logging import get_logger, setup_logging
 
@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Seed default admin user if auth is disabled
     if not settings.enable_auth:
         _seed_default_admin()
+
+    # Start background job queue
+    from app.jobs import get_job_queue
+    get_job_queue()
+    logger.info("background_job_queue_started")
 
     issues = settings.validate_for_production()
     if issues:
@@ -114,7 +119,9 @@ def create_app() -> FastAPI:
     )
 
     # Security middleware
-    app.add_middleware(SecurityHeadersMiddleware)
+    is_production = not settings.debug
+    app.add_middleware(RequestTracingMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, enable_hsts=is_production)
     app.add_middleware(
         RateLimitMiddleware,
         max_requests=settings.rate_limit_requests,

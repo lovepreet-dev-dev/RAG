@@ -21,9 +21,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for token in localStorage (client-side auth)
-  // The middleware runs on the server, so we can't access localStorage.
-  // Auth checking is done client-side via the auth store and layout guards.
+  // Check for auth token in cookie (set by auth store on login)
+  const token = request.cookies.get("auth_token")?.value;
+
+  if (!token) {
+    // No token cookie — redirect to login, preserving the intended URL
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("from", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
   return NextResponse.next();
 }
 

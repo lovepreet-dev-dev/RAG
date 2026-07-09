@@ -6,11 +6,13 @@ Handles login, registration, token refresh, password changes, and user managemen
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db, require_role
+from app.api.deps import get_current_user, get_current_user_optional, get_db, require_role
 from app.config.settings import get_settings
 from app.models.schemas import (
     ChangePasswordRequest,
@@ -100,17 +102,33 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
 )
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user account."""
-    try:
-        role = Role(body.role)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role: {body.role}",
-        )
+def register(
+    body: RegisterRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Register a new user account.
+
+    When auth is enabled, only admins can assign roles other than 'employee'.
+    Self-registration (without auth) is always limited to 'employee' role.
+    """
+    settings = get_settings()
+
+    # Determine allowed role
+    if settings.enable_auth and current_user and current_user.has_role(Role.ADMIN):
+        # Admin can assign any role
+        try:
+            role = Role(body.role)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role: {body.role}",
+            )
+    else:
+        # Non-admin or unauthenticated: force employee role
+        role = Role.EMPLOYEE
 
     try:
         user = create_user(
@@ -132,7 +150,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
         action="register",
         resource_type="user",
         resource_id=user.id,
-        details=f"role={body.role}",
+        details=f"role={role.value}",
     )
 
     return user_to_response(user)
@@ -417,3 +435,132 @@ def delete_user_endpoint(
 
     logger.info("user_deleted", user_id=user_id, deleted_by=current_user.id)
     return {"message": "User deleted successfully"}
+
+
+# ── Password Reset Endpoints ────────────────────────────────────────────
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Forgot password request."""
+
+    email: str = Field(..., min_length=3, max_length=255)
+
+
+class ResetPasswordRequest(BaseModel):
+    """Reset password request with token."""
+
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+@router.post(
+    "/forgot-password",
+    responses={200: {"model": dict}},
+)
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Request a password reset token.
+
+    Always returns success to prevent user enumeration.
+    The token is logged for development purposes.
+    """
+    import secrets
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.user import PasswordResetToken
+
+    user = get_user_by_email(db, body.email)
+
+    # Always return success to prevent user enumeration
+    if user is None:
+        logger.info("password_reset_requested_nonexistent", email=body.email)
+        return {"message": "If an account exists, a reset link has been sent."}
+
+    # Generate reset token
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at,
+    )
+    db.add(reset_token)
+    db.commit()
+
+    log_audit(
+        db,
+        user_id=user.id,
+        action="password_reset_requested",
+        resource_type="user",
+        resource_id=user.id,
+    )
+
+    logger.info(
+        "password_reset_token_generated",
+        user_id=user.id,
+        email=user.email,
+        token=token,
+    )
+
+    return {"message": "If an account exists, a reset link has been sent."}
+
+
+@router.post(
+    "/reset-password",
+    responses={400: {"model": ErrorResponse}},
+)
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Reset password using a valid reset token."""
+    from datetime import datetime, timezone
+
+    from app.models.user import PasswordResetToken
+    from app.services.auth_service import hash_password, revoke_all_refresh_tokens
+
+    reset_record = (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.token == body.token,
+            PasswordResetToken.used == False,
+        )
+        .first()
+    )
+
+    if reset_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    # Check expiration
+    if reset_record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired",
+        )
+
+    # Get user
+    user = get_user_by_id(db, reset_record.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found or deactivated",
+        )
+
+    # Update password
+    user.hashed_password = hash_password(body.new_password)
+    reset_record.used = True
+    db.commit()
+
+    # Revoke all refresh tokens for security
+    revoke_all_refresh_tokens(db, user.id)
+
+    log_audit(
+        db,
+        user_id=user.id,
+        action="password_reset_completed",
+        resource_type="user",
+        resource_id=user.id,
+    )
+
+    logger.info("password_reset_completed", user_id=user.id)
+    return {"message": "Password reset successfully"}
