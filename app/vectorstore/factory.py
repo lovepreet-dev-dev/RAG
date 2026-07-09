@@ -45,10 +45,15 @@ def get_vector_store(
     if store_type == VectorStoreType.FAISS:
         from app.vectorstore.faiss_store import FAISSVectorStore
 
-        return FAISSVectorStore(
+        store = FAISSVectorStore(
             embedding_function=embeddings,
             persist_directory=settings.faiss_index_dir,
         )
+
+        # Check embedding version compatibility
+        _check_embedding_version(settings, settings.faiss_index_dir)
+
+        return store
 
     if store_type == VectorStoreType.CHROMA:
         from app.vectorstore.chroma_store import ChromaVectorStore
@@ -79,3 +84,19 @@ def get_vector_store(
         )
 
     raise ValueError(f"Unsupported vector store type: {store_type}")
+
+
+def _check_embedding_version(settings: Settings, persist_dir: str) -> None:
+    """Log a warning if the embedding model has changed since last index."""
+    from app.embeddings.versioning import EmbeddingVersionTracker
+
+    tracker = EmbeddingVersionTracker(persist_dir)
+    needs_reindex, reason = tracker.needs_reindex(
+        current_model=settings.embedding_model.value,
+    )
+    if needs_reindex:
+        logger.warning(
+            "embedding_model_changed",
+            reason=reason,
+            action="Consider reindexing documents",
+        )

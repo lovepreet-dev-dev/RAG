@@ -123,7 +123,7 @@ class TestAnswerConfidence:
     def test_high_confidence(self) -> None:
         """High scores should produce 'high' level."""
         retrieval = RetrievalConfidence(
-            score=0.9, avg_score=0.9, score_variance=0.001,
+            score=0.95, avg_score=0.95, score_variance=0.001,
             agreement_ratio=1.0, document_diversity=1.0,
             metadata_consistency=1.0, chunk_overlap_ratio=0.8,
             total_results=9,
@@ -131,8 +131,10 @@ class TestAnswerConfidence:
         )
         conf = compute_answer_confidence(
             retrieval,
-            reranker_scores=[0.95, 0.92, 0.90],
+            reranker_scores=[0.95, 0.92],
             doc_count=5,
+            source_agreement=1.0,
+            citation_coverage=0.8,
         )
         assert conf.level == "high"
         assert conf.score >= 0.7
@@ -140,13 +142,15 @@ class TestAnswerConfidence:
     def test_medium_confidence(self) -> None:
         """Medium scores should produce 'medium' level."""
         retrieval = RetrievalConfidence(
-            score=0.5, avg_score=0.5, score_variance=0.05,
+            score=0.7, avg_score=0.7, score_variance=0.03,
             agreement_ratio=0.66, document_diversity=0.7,
             metadata_consistency=0.7, chunk_overlap_ratio=0.5,
             total_results=6,
             unique_documents=4, strategy_counts={"similarity": 3, "mmr": 3},
         )
-        conf = compute_answer_confidence(retrieval)
+        conf = compute_answer_confidence(
+            retrieval, doc_count=3, reranker_scores=[0.9],
+        )
         assert conf.level == "medium"
 
     def test_reranker_boosts_confidence(self) -> None:

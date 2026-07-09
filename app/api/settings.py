@@ -192,5 +192,12 @@ def update_settings_endpoint(
         keys=list(update_data.keys()),
     )
 
+    # Refresh the RAG service to pick up new settings
+    try:
+        from app.services.dependencies import get_rag_service
+        get_rag_service().refresh_settings()
+    except Exception as exc:
+        logger.warning("settings_refresh_failed", error=str(exc))
+
     # Return updated settings
     return get_settings_endpoint(current_user=current_user, db=db)

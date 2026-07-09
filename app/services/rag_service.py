@@ -71,6 +71,22 @@ class RAGService:
 
         self._sessions: dict[str, list[dict[str, str]]] = {}
 
+    def refresh_settings(self) -> None:
+        """Refresh settings from the environment.
+
+        Call this after settings are updated via the API to pick up changes.
+        Resets cached components that depend on settings.
+        """
+        from app.config.settings import get_settings
+
+        self._settings = get_settings()
+        # Reset cached components that depend on settings
+        self._pipeline = None
+        self._retriever = None
+        self._reranker = None
+        self._validator = None
+        logger.info("rag_service_settings_refreshed")
+
     @property
     def vector_store(self) -> BaseVectorStore:
         """Lazy-load the vector store."""

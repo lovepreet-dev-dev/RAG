@@ -42,7 +42,26 @@ class FAISSVectorStore(BaseVectorStore):
         self._docstore: dict[str, Document] = {}
         self._ids: list[str] = []
         self._collection_name = kwargs.get("collection_name", "default")
+        self._bm25 = None
+        self._bm25_dirty = True
         self._build_index()
+        self._auto_load()
+
+    def _auto_load(self) -> None:
+        """Auto-load persisted index if it exists."""
+        if self._persist_directory is None:
+            return
+        index_path = self._persist_directory / "index.faiss"
+        if index_path.exists():
+            try:
+                self.load()
+                logger.info(
+                    "faiss_auto_loaded",
+                    path=str(self._persist_directory),
+                    doc_count=len(self._docstore),
+                )
+            except Exception as exc:
+                logger.warning("faiss_auto_load_failed", error=str(exc))
 
     def _build_index(self) -> None:
         """Initialise an empty FAISS index via lazy import."""
@@ -111,6 +130,7 @@ class FAISSVectorStore(BaseVectorStore):
             self._ids.append(doc_id)
 
         logger.info("faiss_documents_added", count=len(documents))
+        self._bm25_dirty = True
         return ids
 
     def similarity_search(
@@ -177,6 +197,67 @@ class FAISSVectorStore(BaseVectorStore):
 
         return results
 
+    def _get_bm25(self) -> Any:
+        """Get or build the BM25 index lazily."""
+        if self._bm25 is None or self._bm25_dirty:
+            from app.retriever.bm25_search import BM25Search
+
+            self._bm25 = BM25Search()
+            docs = list(self._docstore.values())
+            if docs:
+                self._bm25.build_index(docs)
+            self._bm25_dirty = False
+        return self._bm25
+
+    def hybrid_search(
+        self,
+        query: str,
+        k: int = 5,
+        filter_dict: Optional[dict[str, Any]] = None,
+        collection_name: Optional[str] = None,
+        **kwargs: Any,
+    ) -> list[tuple[Document, float]]:
+        """Hybrid search combining BM25 lexical + dense vector via RRF.
+
+        Overrides the base fallback to provide true hybrid retrieval.
+
+        Args:
+            query: Search query text.
+            k: Number of results.
+            filter_dict: Optional metadata filters.
+
+        Returns:
+            List of (Document, score) tuples ranked by RRF fusion.
+        """
+        from app.retriever.bm25_search import reciprocal_rank_fusion
+
+        # Dense vector search
+        dense_results = self.similarity_search_with_score(
+            query, k=k * 3, filter_dict=filter_dict,
+        )
+
+        # BM25 lexical search
+        bm25 = self._get_bm25()
+        bm25_results = bm25.search(query, k=k * 3)
+
+        # Apply metadata filter to BM25 results if specified
+        if filter_dict:
+            bm25_results = [
+                (doc, score) for doc, score in bm25_results
+                if self._matches_filter(doc.metadata, filter_dict)
+            ]
+
+        # Combine via Reciprocal Rank Fusion
+        fused = reciprocal_rank_fusion([dense_results, bm25_results])
+
+        logger.debug(
+            "hybrid_search_complete",
+            dense_count=len(dense_results),
+            bm25_count=len(bm25_results),
+            fused_count=len(fused),
+        )
+        return fused[:k]
+
     def delete_documents(
         self,
         ids: Optional[list[str]] = None,
@@ -209,6 +290,7 @@ class FAISSVectorStore(BaseVectorStore):
             self._refresh_index()
             self._metadata = [m for m in self._metadata if m["id"] in self._docstore]
             self._ids = [i for i in self._ids if i in self._docstore]
+            self._bm25_dirty = True
 
         return removed
 
@@ -221,6 +303,7 @@ class FAISSVectorStore(BaseVectorStore):
         self._docstore.clear()
         self._metadata.clear()
         self._ids.clear()
+        self._bm25_dirty = True
         self._refresh_index()
         logger.info("faiss_store_reset")
 

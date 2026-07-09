@@ -259,7 +259,7 @@ class AnswerValidator:
             for i, r in enumerate(sources[:5])
         )
 
-        prompt = f"""You are a fact-checking assistant. Given a question, answer, and source documents,
+        prompt = f"""You are a strict fact-checking assistant. Given a question, answer, and source documents,
 determine which statements in the answer are NOT supported by the sources.
 
 Question: {query}
@@ -270,8 +270,15 @@ Answer to check:
 Source documents:
 {context}
 
+Rules:
+1. A statement is SUPPORTED if the information can be reasonably inferred from the sources.
+2. A statement is UNSUPPORTED if it contains specific facts, numbers, dates, or claims not present in the sources.
+3. A statement is UNSUPPORTED if it fabricates citations or attributes information to the wrong source.
+4. If the answer says "I don't know" or "Information not found", that is VALID — not a hallucination.
+5. Be strict — only mark as unsupported if the information genuinely cannot be found or inferred from the sources.
+
 List each unsupported statement on a new line. If all statements are supported, reply with "NONE".
-Be strict — only mark as unsupported if the information genuinely cannot be found in the sources."""
+Format: "UNSUPPORTED: <statement>" for each unsupported statement."""
 
         try:
             response = self._llm.invoke([
@@ -302,7 +309,9 @@ Be strict — only mark as unsupported if the information genuinely cannot be fo
     ) -> tuple[float, list[str]]:
         """Keyword-based hallucination detection (fallback).
 
-        Flags sentences that contain numbers/statistics not found in sources.
+        Flags sentences that contain:
+        1. Numbers/statistics not found in sources
+        2. Key nouns/phrases not found in sources
 
         Args:
             answer: LLM-generated answer.
@@ -312,6 +321,7 @@ Be strict — only mark as unsupported if the information genuinely cannot be fo
             Tuple of (score, unsupported statements).
         """
         source_text = " ".join(r.document.page_content for r in sources)
+        source_words = set(source_text.lower().split())
 
         # Find numeric claims in answer
         answer_numbers = set(re.findall(r"\b\d+\.?\d*%?\b", answer))
@@ -322,10 +332,27 @@ Be strict — only mark as unsupported if the information genuinely cannot be fo
         sentences = answer.split(".")
         unsupported = []
         for sent in sentences:
+            sent_stripped = sent.strip()
+            if len(sent_stripped) < 10:
+                continue
+
+            # Check 1: Numeric claims not in source
             for num in unsupported_numbers:
-                if num in sent and len(sent.strip()) > 10:
-                    unsupported.append(sent.strip())
+                if num in sent:
+                    unsupported.append(sent_stripped)
                     break
+            else:
+                # Check 2: Key content words not in source
+                sent_words = set(re.findall(r"\b[a-z]{4,}\b", sent_stripped.lower()))
+                # Remove common stop words
+                stop_words = {"this", "that", "with", "from", "have", "been", "were", "they", "their", "about", "which", "would", "could", "should", "there", "also", "than", "then", "some", "into", "only", "very", "most", "when", "what", "your", "will", "each", "make", "like", "over", "such"}
+                content_words = sent_words - stop_words
+
+                if content_words:
+                    # If more than half of content words are not in source, flag it
+                    missing = content_words - source_words
+                    if len(missing) > len(content_words) * 0.5 and len(content_words) >= 2:
+                        unsupported.append(sent_stripped)
 
         score = max(0.0, 1.0 - len(unsupported) * 0.15)
         return score, unsupported

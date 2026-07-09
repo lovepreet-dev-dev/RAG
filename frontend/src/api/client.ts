@@ -158,10 +158,10 @@ export const authApi = {
 
 export const chatApi = {
   query: (data: ChatRequest) =>
-    api.post<QueryResponse>("/api/query", data).then((r) => r.data),
+    api.post<QueryResponse>("/api/v1/query", data).then((r) => r.data),
 
   chat: (data: ChatReq) =>
-    api.post<QueryResponse>("/api/chat", { ...data, stream: false }).then((r) => r.data),
+    api.post<QueryResponse>("/api/v1/chat", { ...data, stream: false }).then((r) => r.data),
 };
 
 // ── Streaming ───────────────────────────────────────────────────────────────
@@ -315,13 +315,13 @@ export const chatHistoryApi = {
 
 export const documentsApi = {
   list: () =>
-    api.get<DocumentListResponse>("/api/documents").then((r) => r.data),
+    api.get<DocumentListResponse>("/api/v1/documents").then((r) => r.data),
 
   upload: (files: File[]) => {
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
     return api
-      .post<UploadResponse>("/api/upload", form, {
+      .post<UploadResponse>("/api/v1/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       })
       .then((r) => r.data);
@@ -329,14 +329,14 @@ export const documentsApi = {
 
   ingest: (filenames: string[]) =>
     api
-      .post<UploadResponse>("/api/ingest", { filenames })
+      .post<UploadResponse>("/api/v1/ingest", { filenames })
       .then((r) => r.data),
 
   delete: (documentId: string) =>
-    api.delete(`/api/documents/${documentId}`).then((r) => r.data),
+    api.delete(`/api/v1/documents/${documentId}`).then((r) => r.data),
 
   getContent: (documentId: string) =>
-    api.get(`/api/documents/${documentId}/content`).then((r) => r.data),
+    api.get(`/api/v1/documents/${documentId}/content`).then((r) => r.data),
 
   download: (documentId: string) => {
     const token = typeof window !== "undefined"
@@ -348,10 +348,10 @@ export const documentsApi = {
   },
 
   getStats: () =>
-    api.get<StatsResponse>("/api/stats").then((r) => r.data),
+    api.get<StatsResponse>("/api/v1/stats").then((r) => r.data),
 
   health: () =>
-    api.get<HealthResponse>("/api/health").then((r) => r.data),
+    api.get<HealthResponse>("/api/v1/health").then((r) => r.data),
 };
 
 // ── Settings API ────────────────────────────────────────────────────────────
@@ -383,5 +383,5 @@ export const usersApi = {
 
 export const feedbackApi = {
   submit: (data: FeedbackRequest) =>
-    api.post("/api/feedback", data).then((r) => r.data),
+    api.post("/api/v1/feedback", data).then((r) => r.data),
 };

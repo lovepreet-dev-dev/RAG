@@ -176,6 +176,8 @@ def compute_answer_confidence(
     llm_confidence: float | None = None,
     doc_count: int = 0,
     source_agreement: float = 0.0,
+    citation_coverage: float | None = None,
+    answer_completeness: float | None = None,
 ) -> AnswerConfidence:
     """Compute final answer confidence from all signals.
 
@@ -185,6 +187,8 @@ def compute_answer_confidence(
     3. LLM self-reported confidence (if available)
     4. Number of retrieved documents
     5. Source agreement (overlap between retrieval strategies)
+    6. Citation coverage (fraction of sources cited in answer)
+    7. Answer completeness (how thoroughly the answer addresses the question)
 
     Args:
         retrieval_confidence: Pre-computed retrieval confidence.
@@ -192,6 +196,8 @@ def compute_answer_confidence(
         llm_confidence: Optional LLM-reported confidence (0-1).
         doc_count: Number of documents in final context.
         source_agreement: Fraction of strategies that agreed on top results.
+        citation_coverage: Fraction of retrieved sources cited in the answer (0-1).
+        answer_completeness: How complete the answer is (0-1).
 
     Returns:
         Final answer confidence with level and detailed signals.
@@ -201,7 +207,7 @@ def compute_answer_confidence(
     # Signal 1: Retrieval confidence (weight: 0.35)
     signals["retrieval"] = retrieval_confidence.score
 
-    # Signal 2: Reranker average (weight: 0.25, or 0 if unavailable)
+    # Signal 2: Reranker average (weight: 0.20, or 0 if unavailable)
     if reranker_scores:
         reranker_avg = statistics.mean(reranker_scores)
         signals["reranker"] = reranker_avg
@@ -209,45 +215,42 @@ def compute_answer_confidence(
         reranker_avg = 0.0
         signals["reranker"] = 0.0
 
-    # Signal 3: LLM confidence (weight: 0.20, or 0 if unavailable)
+    # Signal 3: LLM confidence (weight: 0.15, or 0 if unavailable)
     if llm_confidence is not None:
         signals["llm"] = llm_confidence
     else:
         signals["llm"] = 0.0
 
     # Signal 4: Document count signal (weight: 0.10)
-    # More docs up to a point = higher confidence, then plateau
     doc_signal = min(1.0, doc_count / 5.0)
     signals["doc_count"] = doc_signal
 
     # Signal 5: Source agreement (weight: 0.10)
     signals["source_agreement"] = source_agreement
 
-    # Weighted combination
+    # Signal 6: Citation coverage (weight: 0.05)
+    signals["citation_coverage"] = citation_coverage if citation_coverage is not None else 0.0
+
+    # Signal 7: Answer completeness (weight: 0.05)
+    signals["answer_completeness"] = answer_completeness if answer_completeness is not None else 0.0
+
+    # Weighted combination: normalize by available signal weights
+    # This ensures that when only a subset of signals is available,
+    # the score reflects the quality of available signals (0-1 range).
     weights = {
         "retrieval": 0.35,
-        "reranker": 0.25,
-        "llm": 0.20,
+        "reranker": 0.20,
+        "llm": 0.15,
         "doc_count": 0.10,
         "source_agreement": 0.10,
+        "citation_coverage": 0.05,
+        "answer_completeness": 0.05,
     }
 
-    # Normalize weights based on available signals
-    available = {k: v for k, v in signals.items() if k != "doc_count" and k != "source_agreement"}
-    total_weight = sum(weights[k] for k in available if k in weights)
+    weighted_sum = sum(signals[k] * weights[k] for k in weights if k in signals)
+    total_weight = sum(weights[k] for k in weights if k in signals)
 
-    if total_weight > 0:
-        score = sum(
-            signals[k] * (weights[k] / total_weight)
-            for k in available
-            if k in weights
-        )
-    else:
-        score = 0.0
-
-    # Always include doc_count and source_agreement
-    score += weights["doc_count"] * doc_signal
-    score += weights["source_agreement"] * source_agreement
+    score = weighted_sum / total_weight if total_weight > 0 else 0.0
 
     score = max(0.0, min(1.0, score))
 
