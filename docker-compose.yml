@@ -11,6 +11,11 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/v1/health').raise_for_status()"]
       interval: 30s
@@ -31,6 +36,11 @@ services:
       rag-api:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
   nginx:
     image: nginx:alpine
@@ -43,6 +53,11 @@ services:
       - rag-api
       - frontend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
 
   # Optional: Qdrant
   # qdrant:

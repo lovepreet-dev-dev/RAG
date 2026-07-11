@@ -34,17 +34,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app,
         max_requests: int = 100,
         window_seconds: int = 60,
+        trusted_proxies: list[str] | None = None,
     ):
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
+        self._trusted_proxies = set(trusted_proxies or [])
 
     def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP, respecting X-Forwarded-For."""
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        """Extract client IP. Only trusts X-Forwarded-For from known proxies."""
+        if self._trusted_proxies and request.client:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                first_hop = forwarded.split(",")[0].strip()
+                if request.client.host in self._trusted_proxies:
+                    return first_hop
         if request.client:
             return request.client.host
         return "unknown"
@@ -118,7 +123,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content Security Policy — restrict resource loading
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+            "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
             "font-src 'self'",

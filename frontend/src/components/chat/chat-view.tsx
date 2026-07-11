@@ -58,6 +58,13 @@ export function ChatView({ sessionId }: { sessionId?: string }) {
     textareaRef.current?.focus();
   }, []);
 
+  // Abort streaming on unmount
+  useEffect(() => {
+    return () => {
+      streamingController?.abort();
+    };
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || isStreaming) return;

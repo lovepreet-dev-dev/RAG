@@ -80,9 +80,9 @@ _DEFAULTS = {
     "gemini_model": "gemini-1.5-flash",
     "embedding_model": "bge-small",
     "vector_store": "faiss",
-    "enable_mmr": "false",
-    "enable_hybrid_search": "false",
-    "enable_multi_query": "false",
+    "enable_mmr": "true",
+    "enable_hybrid_search": "true",
+    "enable_multi_query": "true",
     "enable_reranking": "false",
     "similarity_top_k": "10",
     "mmr_top_k": "10",
@@ -93,7 +93,7 @@ _DEFAULTS = {
     "score_threshold": "0.3",
     "rerank_top_k": "5",
     "temperature": "0.3",
-    "enable_answer_validation": "false",
+    "enable_answer_validation": "true",
 }
 
 

@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         auth_enabled=settings.enable_auth,
     )
     yield
+    # Graceful shutdown: stop background job queue
+    from app.jobs import get_job_queue
+    get_job_queue().stop()
     logger.info("shutting_down_rag_application")
 
 
@@ -110,13 +113,17 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
     allowed_origins = settings.cors_origins or ["*"]
+    has_wildcard = "*" in allowed_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-        allow_credentials=True,
+        allow_credentials=not has_wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if has_wildcard:
+        logger = get_logger(__name__)
+        logger.warning("cors_wildcard_with_credentials_disabled")
 
     # Security middleware
     is_production = not settings.debug

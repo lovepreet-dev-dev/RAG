@@ -6,7 +6,9 @@ import type { Role, User } from "@/types";
 
 function setCookie(name: string, value: string, maxAge: number) {
   if (typeof document !== "undefined") {
-    document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+    const secure = !window.location.hostname.includes("localhost");
+    const secureFlag = secure ? "; Secure" : "";
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax${secureFlag}`;
   }
 }
 

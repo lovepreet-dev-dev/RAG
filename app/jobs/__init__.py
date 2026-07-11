@@ -11,7 +11,6 @@ import threading
 import time
 import traceback
 import uuid
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -19,6 +18,8 @@ from typing import Any, Callable, Optional
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+_MAX_JOB_HISTORY = 500
 
 
 class JobStatus(str, enum.Enum):
@@ -42,6 +43,7 @@ class BackgroundJob:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     job_type: str = ""
     func_name: str = ""
+    func: Optional[Callable] = field(default=None, repr=False)
     args: tuple = ()
     kwargs: dict = field(default_factory=dict)
     status: JobStatus = JobStatus.PENDING
@@ -58,14 +60,13 @@ class BackgroundJob:
 class JobQueue:
     """In-process background job queue with worker threads."""
 
-    def __init__(self, max_workers: int = 2, max_queue_size: int = 100):
+    def __init__(self, max_workers: int = 2):
         """Initialize the job queue.
 
         Args:
             max_workers: Number of worker threads.
-            max_queue_size: Maximum jobs in the queue.
         """
-        self._queue: deque[BackgroundJob] = deque(maxlen=max_queue_size)
+        self._queue: list[BackgroundJob] = []
         self._jobs: dict[str, BackgroundJob] = {}
         self._workers: list[threading.Thread] = []
         self._lock = threading.Lock()
@@ -87,10 +88,11 @@ class JobQueue:
         logger.info("job_queue_started", workers=self._max_workers)
 
     def stop(self) -> None:
-        """Signal workers to stop."""
+        """Signal workers to stop and wait for them."""
         self._shutdown = True
         for t in self._workers:
             t.join(timeout=5)
+        self._workers.clear()
         logger.info("job_queue_stopped")
 
     def submit(
@@ -118,6 +120,7 @@ class JobQueue:
         job = BackgroundJob(
             job_type=job_type,
             func_name=func.__name__,
+            func=func,
             args=args,
             kwargs=kwargs or {},
             priority=priority,
@@ -126,7 +129,7 @@ class JobQueue:
 
         with self._lock:
             self._jobs[job.id] = job
-            # Insert in priority order
+            # Insert in priority order (list, not deque — no maxlen crash)
             inserted = False
             for i, existing in enumerate(self._queue):
                 if job.priority > existing.priority:
@@ -135,6 +138,9 @@ class JobQueue:
                     break
             if not inserted:
                 self._queue.append(job)
+
+            # Evict old completed/failed/cancelled jobs to cap memory
+            self._evict_old_jobs()
 
         logger.info(
             "job_submitted",
@@ -175,13 +181,29 @@ class JobQueue:
         logger.info("job_cancelled", job_id=job_id)
         return True
 
+    def _evict_old_jobs(self) -> None:
+        """Evict terminal jobs when history exceeds cap."""
+        if len(self._jobs) <= _MAX_JOB_HISTORY:
+            return
+        terminal = (
+            j for j in self._jobs.values()
+            if j.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
+        )
+        sorted_terminal = sorted(
+            terminal,
+            key=lambda j: j.completed_at or j.created_at,
+        )
+        to_remove = len(sorted_terminal) - (_MAX_JOB_HISTORY // 2)
+        for j in sorted_terminal[:to_remove]:
+            self._jobs.pop(j.id, None)
+
     def _worker_loop(self) -> None:
         """Main loop for worker threads."""
         while not self._shutdown:
             job = None
             with self._lock:
                 if self._queue:
-                    job = self._queue.popleft()
+                    job = self._queue.pop(0)
 
             if job is None:
                 time.sleep(0.1)
@@ -195,18 +217,8 @@ class JobQueue:
             logger.info("job_started", job_id=job.id, func=job.func_name)
 
             try:
-                # Import and call the function
-                module_path, func_name = job.func_name.rsplit(".", 1) if "." in job.func_name else ("", job.func_name)
-                if module_path:
-                    import importlib
-                    mod = importlib.import_module(module_path)
-                    func = getattr(mod, func_name)
-                else:
-                    # Function was passed directly
-                    func = job.func_name
-
-                if callable(func):
-                    result = func(*job.args, **job.kwargs)
+                if job.func is not None and callable(job.func):
+                    result = job.func(*job.args, **job.kwargs)
                     job.result = result
                 else:
                     job.error = f"Function not callable: {job.func_name}"

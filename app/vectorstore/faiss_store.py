@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -44,6 +45,7 @@ class FAISSVectorStore(BaseVectorStore):
         self._collection_name = kwargs.get("collection_name", "default")
         self._bm25 = None
         self._bm25_dirty = True
+        self._lock = threading.Lock()
         self._build_index()
         self._auto_load()
 
@@ -119,18 +121,20 @@ class FAISSVectorStore(BaseVectorStore):
         ids = [kwargs.get("ids", [None] * len(documents))[i] or f"doc_{hash(texts[i])}" for i in range(len(documents))]
 
         vectors = self._embed_texts(texts)
-        self._index.add(vectors)
 
-        for i, doc in enumerate(documents):
-            doc_id = ids[i]
-            self._docstore[doc_id] = doc
-            self._metadata.append(
-                {"id": doc_id, "metadata": metadatas[i], "text_preview": texts[i][:100]}
-            )
-            self._ids.append(doc_id)
+        with self._lock:
+            self._index.add(vectors)
 
-        logger.info("faiss_documents_added", count=len(documents))
-        self._bm25_dirty = True
+            for i, doc in enumerate(documents):
+                doc_id = ids[i]
+                self._docstore[doc_id] = doc
+                self._metadata.append(
+                    {"id": doc_id, "metadata": metadatas[i], "text_preview": texts[i][:100]}
+                )
+                self._ids.append(doc_id)
+
+            logger.info("faiss_documents_added", count=len(documents))
+            self._bm25_dirty = True
         return ids
 
     def similarity_search(
@@ -179,7 +183,9 @@ class FAISSVectorStore(BaseVectorStore):
 
         query_vector = self._embed_texts([query])
         actual_k = min(k, self._index.ntotal)
-        distances, indices = self._index.search(query_vector, actual_k)
+
+        with self._lock:
+            distances, indices = self._index.search(query_vector, actual_k)
 
         results: list[tuple[Document, float]] = []
         for dist, idx in zip(distances[0], indices[0]):
@@ -274,23 +280,24 @@ class FAISSVectorStore(BaseVectorStore):
         Returns:
             Number of documents deleted.
         """
-        if ids:
-            removed = sum(1 for i in ids if self._docstore.pop(i, None) is not None)
-        elif filter_dict:
-            removed = 0
-            for doc_id in list(self._docstore):
-                if self._matches_filter(self._docstore[doc_id].metadata, filter_dict):
-                    self._docstore.pop(doc_id)
-                    removed += 1
-        else:
-            removed = len(self._docstore)
-            self._docstore.clear()
+        with self._lock:
+            if ids:
+                removed = sum(1 for i in ids if self._docstore.pop(i, None) is not None)
+            elif filter_dict:
+                removed = 0
+                for doc_id in list(self._docstore):
+                    if self._matches_filter(self._docstore[doc_id].metadata, filter_dict):
+                        self._docstore.pop(doc_id)
+                        removed += 1
+            else:
+                removed = len(self._docstore)
+                self._docstore.clear()
 
-        if removed:
-            self._refresh_index()
-            self._metadata = [m for m in self._metadata if m["id"] in self._docstore]
-            self._ids = [i for i in self._ids if i in self._docstore]
-            self._bm25_dirty = True
+            if removed:
+                self._refresh_index()
+                self._metadata = [m for m in self._metadata if m["id"] in self._docstore]
+                self._ids = [i for i in self._ids if i in self._docstore]
+                self._bm25_dirty = True
 
         return removed
 
@@ -322,13 +329,14 @@ class FAISSVectorStore(BaseVectorStore):
             logger.warning("faiss_save_no_path", msg="No persist directory set; skipping save.")
             return
 
-        dir_path.mkdir(parents=True, exist_ok=True)
-        self._faiss.write_index(self._index, str(dir_path / "index.faiss"))
-        (dir_path / "metadata.json").write_text(json.dumps(self._metadata, indent=2))
-        (dir_path / "ids.json").write_text(json.dumps(self._ids))
-        docstore_data = {k: {"page_content": v.page_content, "metadata": v.metadata} for k, v in self._docstore.items()}
-        (dir_path / "docstore.json").write_text(json.dumps(docstore_data))
-        logger.info("faiss_saved", path=str(dir_path), doc_count=len(self._docstore))
+        with self._lock:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            self._faiss.write_index(self._index, str(dir_path / "index.faiss"))
+            (dir_path / "metadata.json").write_text(json.dumps(self._metadata, indent=2))
+            (dir_path / "ids.json").write_text(json.dumps(self._ids))
+            docstore_data = {k: {"page_content": v.page_content, "metadata": v.metadata} for k, v in self._docstore.items()}
+            (dir_path / "docstore.json").write_text(json.dumps(docstore_data))
+            logger.info("faiss_saved", path=str(dir_path), doc_count=len(self._docstore))
 
     def load(self, path: Optional[str] = None, **kwargs: Any) -> None:
         """Load persisted index and metadata from disk.

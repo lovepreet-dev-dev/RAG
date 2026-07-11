@@ -60,8 +60,8 @@ def client_fixture(db_session):
 
 class TestSettingsEndpoints:
     def test_get_settings(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         response = client.get("/api/v1/settings", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
@@ -70,8 +70,8 @@ class TestSettingsEndpoints:
         assert "embedding_model" in data
 
     def test_update_settings_admin(self, client, db_session):
-        create_user(db=db_session, email="admin@test.com", name="Admin", password="pass123", role=Role.ADMIN)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "admin@test.com", "password": "pass123"})
+        create_user(db=db_session, email="admin@test.com", name="Admin", password="Pass1234!", role=Role.ADMIN)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "admin@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         response = client.put(
             "/api/v1/settings",
@@ -82,8 +82,8 @@ class TestSettingsEndpoints:
         assert response.json()["llm_provider"] == "anthropic"
 
     def test_update_settings_requires_admin(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         response = client.put(
             "/api/v1/settings",
@@ -95,8 +95,8 @@ class TestSettingsEndpoints:
 
 class TestChatHistoryEndpoints:
     def test_create_session(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         response = client.post(
             "/api/v1/chat/sessions",
@@ -109,8 +109,8 @@ class TestChatHistoryEndpoints:
         assert "id" in data
 
     def test_list_sessions(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         client.post(
             "/api/v1/chat/sessions",
@@ -122,8 +122,8 @@ class TestChatHistoryEndpoints:
         assert response.json()["total_count"] >= 1
 
     def test_add_message(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         session_resp = client.post(
             "/api/v1/chat/sessions",
@@ -140,8 +140,8 @@ class TestChatHistoryEndpoints:
         assert response.json()["content"] == "Hello"
 
     def test_delete_session(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         session_resp = client.post(
             "/api/v1/chat/sessions",
@@ -156,8 +156,8 @@ class TestChatHistoryEndpoints:
         assert response.status_code == 200
 
     def test_pin_session(self, client, db_session):
-        create_user(db=db_session, email="user@test.com", name="User", password="pass123", role=Role.EMPLOYEE)
-        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "pass123"})
+        create_user(db=db_session, email="user@test.com", name="User", password="Pass1234!", role=Role.EMPLOYEE)
+        login_resp = client.post("/api/v1/auth/login", json={"email": "user@test.com", "password": "Pass1234!"})
         token = login_resp.json()["access_token"]
         session_resp = client.post(
             "/api/v1/chat/sessions",

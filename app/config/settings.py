@@ -19,7 +19,6 @@ Design decisions
 
 from __future__ import annotations
 
-import warnings
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -636,16 +635,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_auth_secret(self) -> Settings:
-        """Warn if auth is enabled but the secret key is the default placeholder.
+        """Require a non-default secret key when auth is enabled.
 
         Returns:
             The validated Settings instance.
+
+        Raises:
+            ValueError: If auth is enabled but SECRET_KEY is the default placeholder.
         """
         if self.enable_auth and self.secret_key == "change-this-to-a-random-secret-key":
-            warnings.warn(
-                "Authentication is enabled but SECRET_KEY is the default placeholder. "
-                "Generate a secure key for production use.",
-                stacklevel=1,
+            raise ValueError(
+                "SECRET_KEY must be changed from the default placeholder when "
+                "authentication is enabled. Generate a secure key with: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(64))\""
             )
         return self
 

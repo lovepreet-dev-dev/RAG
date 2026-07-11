@@ -53,8 +53,9 @@ export function MarkdownRenderer({ content }: Props) {
             return <td className="border border-border px-3 py-2 text-sm">{children}</td>;
           },
           a({ href, children }) {
+            const isSafe = href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("#") || href.startsWith("/"));
             return (
-              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">
+              <a href={isSafe ? href : "#"} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">
                 {children}
               </a>
             );

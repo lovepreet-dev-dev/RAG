@@ -5,6 +5,7 @@ Handles login, registration, token refresh, password changes, and user managemen
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -45,20 +46,55 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# In-memory failed login tracking: {email: (count, first_failure_time)}
+_FAILED_LOGINS: dict[str, tuple[int, float]] = {}
+_MAX_LOGIN_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 900  # 15 minutes
+
 
 @router.post(
     "/login",
     response_model=TokenResponse,
-    responses={401: {"model": ErrorResponse}},
+    responses={401: {"model": ErrorResponse}, 423: {"model": ErrorResponse}},
 )
 def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate user and return JWT tokens."""
+    """Authenticate user and return JWT tokens.
+
+    Returns 423 Locked after too many failed attempts.
+    """
+    # Check account lockout
+    now = time.time()
+    if body.email in _FAILED_LOGINS:
+        count, first_at = _FAILED_LOGINS[body.email]
+        if count >= _MAX_LOGIN_ATTEMPTS and (now - first_at) < _LOCKOUT_SECONDS:
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail="Account temporarily locked due to too many failed login attempts. Try again later.",
+            )
+        elif (now - first_at) >= _LOCKOUT_SECONDS:
+            _FAILED_LOGINS.pop(body.email, None)
+
     user = authenticate_user(db, body.email, body.password)
     if user is None:
+        # Track failed attempt
+        if body.email in _FAILED_LOGINS:
+            count, first_at = _FAILED_LOGINS[body.email]
+            _FAILED_LOGINS[body.email] = (count + 1, first_at)
+        else:
+            _FAILED_LOGINS[body.email] = (1, now)
+
+        logger.warning(
+            "login_failed",
+            email=body.email,
+            ip=request.client.host if request.client else "unknown",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+
+    # Clear failed attempts on success
+    _FAILED_LOGINS.pop(body.email, None)
 
     # Capture values before commit (which expires the identity)
     user_id = user.id
@@ -242,7 +278,18 @@ def logout(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Logout by revoking the refresh token."""
+    """Logout by revoking the refresh token.
+
+    Verifies the token belongs to the current user before revoking.
+    """
+    from app.services.auth_service import decode_token
+
+    payload = decode_token(body.refresh_token)
+    if payload is None or payload.get("sub") != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid refresh token",
+        )
     revoke_refresh_token(db, body.refresh_token)
     log_audit(db, user_id=current_user.id, action="logout", resource_type="user", resource_id=current_user.id)
     logger.info("user_logout", user_id=current_user.id)
@@ -357,7 +404,10 @@ def update_user_endpoint(
     current_user: User = Depends(require_role(Role.ADMIN)),
     db: Session = Depends(get_db),
 ):
-    """Update a user (admin only)."""
+    """Update a user (admin only).
+
+    Prevents self-deactivation, self-demotion, and removal of the last admin.
+    """
     role = None
     if body.role is not None:
         try:
@@ -383,6 +433,32 @@ def update_user_endpoint(
             detail="User not found",
         )
 
+    # Prevent self-deactivation and self-demotion
+    if user.id == current_user.id:
+        if body.is_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot deactivate your own account",
+            )
+        if role is not None and role != Role.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot demote your own account",
+            )
+
+    # Last-admin protection: prevent demoting or deactivating the last admin
+    if (body.is_active is False or (role is not None and role != Role.ADMIN)):
+        admin_count = (
+            db.query(User)
+            .filter(User.role == Role.ADMIN, User.is_active == True, User.id != user_id)
+            .count()
+        )
+        if admin_count < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot deactivate or demote the last admin user",
+            )
+
     log_audit(
         db,
         user_id=current_user.id,
@@ -404,7 +480,10 @@ def delete_user_endpoint(
     current_user: User = Depends(require_role(Role.ADMIN)),
     db: Session = Depends(get_db),
 ):
-    """Delete a user (admin only)."""
+    """Delete a user (admin only).
+
+    Prevents self-deletion and deletion of the last admin.
+    """
     from app.services.auth_service import get_user_by_id
 
     user = get_user_by_id(db, user_id)
@@ -420,6 +499,19 @@ def delete_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete your own account",
         )
+
+    # Last-admin protection
+    if user.role == Role.ADMIN:
+        admin_count = (
+            db.query(User)
+            .filter(User.role == Role.ADMIN, User.is_active == True, User.id != user_id)
+            .count()
+        )
+        if admin_count < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete the last admin user",
+            )
 
     db.delete(user)
     db.commit()
@@ -499,7 +591,6 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
         "password_reset_token_generated",
         user_id=user.id,
         email=user.email,
-        token=token,
     )
 
     return {"message": "If an account exists, a reset link has been sent."}

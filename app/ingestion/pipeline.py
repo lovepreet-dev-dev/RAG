@@ -271,6 +271,8 @@ def _ingest_single(
     # --- Embed and store ---
     store_start = time.perf_counter()
     vector_store.add_documents(valid_chunks)
+    if hasattr(vector_store, "save"):
+        vector_store.save()
     store_elapsed = (time.perf_counter() - store_start) * 1000
 
     total_elapsed = (time.perf_counter() - start) * 1000

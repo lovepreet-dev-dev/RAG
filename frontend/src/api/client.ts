@@ -97,6 +97,12 @@ api.interceptors.response.use(
           localStorage.setItem("access_token", access_token);
           localStorage.setItem("refresh_token", newRefreshToken);
 
+          // Update cookies to stay in sync with new tokens
+          const secure = typeof window !== "undefined" && !window.location.hostname.includes("localhost");
+          const secureFlag = secure ? "; Secure" : "";
+          document.cookie = `auth_token=${encodeURIComponent(access_token)}; path=/; max-age=${30 * 60}; SameSite=Lax${secureFlag}`;
+          document.cookie = `refresh_token=${encodeURIComponent(newRefreshToken)}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax${secureFlag}`;
+
           processQueue(null, access_token);
 
           if (originalRequest.headers) {

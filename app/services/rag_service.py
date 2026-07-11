@@ -139,14 +139,14 @@ class RAGService:
                         pass
                 elif key == "embedding_model":
                     try:
-                        from app.config.settings import EmbeddingModel
-                        self._settings.embedding_model = EmbeddingModel(value)
+                        from app.config.settings import EmbeddingModelType
+                        self._settings.embedding_model = EmbeddingModelType(value)
                     except (ValueError, TypeError):
                         pass
                 elif key == "vector_store":
                     try:
-                        from app.config.settings import VectorStore
-                        self._settings.vector_store = VectorStore(value)
+                        from app.config.settings import VectorStoreType
+                        self._settings.vector_store = VectorStoreType(value)
                     except (ValueError, TypeError):
                         pass
                 else:
@@ -430,6 +430,10 @@ class RAGService:
         history.append({"role": "user", "content": request.message})
         history.append({"role": "assistant", "content": full_answer})
 
+        max_messages = self._settings.memory_window * 2
+        if len(history) > max_messages:
+            self._sessions[session_id] = history[-max_messages:]
+
     def upload_and_ingest(
         self,
         file_paths: list[str],
@@ -478,6 +482,8 @@ class RAGService:
             ``True`` on success.
         """
         deleted_count = self.vector_store.delete_documents([document_id])
+        if deleted_count > 0 and hasattr(self.vector_store, "save"):
+            self.vector_store.save()
         return deleted_count > 0
 
     def get_documents(self) -> list[IngestedDocument]:

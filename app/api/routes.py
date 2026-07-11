@@ -239,6 +239,7 @@ async def chat_rag(
 
     # Resolve session: use DB-backed sessions when user is authenticated
     session_id = request.session_id or generate_id()
+    request.session_id = session_id  # Ensure service uses the same session ID
     use_db = current_user is not None
 
     if use_db:
@@ -255,13 +256,20 @@ async def chat_rag(
 
     if request.stream:
         async def event_generator():  # type: ignore[no-untyped-def]
+            final_chunk_data = {}
             try:
                 async for chunk in service.chat_stream(request):
                     data = chunk.model_dump_json()
                     yield f"data: {data}\n\n"
+                    if chunk.is_final:
+                        final_chunk_data = {
+                            "query_id": chunk.query_id,
+                            "sources": chunk.sources,
+                            "metadata": chunk.metadata,
+                        }
                 yield "data: [DONE]\n\n"
 
-                # Persist messages after stream completes
+                # Persist messages with metadata after stream completes
                 if use_db:
                     persist_message(
                         db=db,
@@ -272,11 +280,16 @@ async def chat_rag(
                     # Get the full answer from the service's session history
                     history = service._sessions.get(session_id, [])
                     if history and history[-1]["role"] == "assistant":
+                        meta = final_chunk_data.get("metadata", {})
                         persist_message(
                             db=db,
                             session_id=session_id,
                             role="assistant",
                             content=history[-1]["content"],
+                            query_id=final_chunk_data.get("query_id"),
+                            sources=[s.model_dump() for s in final_chunk_data["sources"]] if final_chunk_data.get("sources") else None,
+                            confidence_score=meta.get("retrieval_confidence"),
+                            model_used=meta.get("model"),
                         )
             except Exception as exc:
                 logger.error("streaming_chat_failed", error=str(exc))
@@ -457,7 +470,14 @@ def download_document(
 
         filename = chunks[0].metadata.get("filename", "unknown")
         upload_dir = _get_upload_dir()
-        file_path = upload_dir / filename
+        file_path = (upload_dir / filename).resolve()
+
+        # Prevent path traversal
+        if not str(file_path).startswith(str(upload_dir.resolve())):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path",
+            )
 
         if not file_path.exists():
             raise HTTPException(
