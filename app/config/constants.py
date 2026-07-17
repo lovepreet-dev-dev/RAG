@@ -14,7 +14,6 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 FAISS_INDEX_DIR = DATA_DIR / "faiss_index"
-CHROMA_DIR = DATA_DIR / "chroma"
 TEST_DATA_DIR = BASE_DIR / "tests" / "fixtures"
 UPLOAD_DIR = DATA_DIR / "uploads"
 
@@ -45,18 +44,10 @@ SUPPORTED_MIME_TYPES: dict[str, str] = {
 
 EMBEDDING_MODEL_MAP: dict[str, str] = {
     "bge-small": "BAAI/bge-small-en-v1.5",
-    "bge-large": "BAAI/bge-large-en-v1.5",
-    "minilm": "all-MiniLM-L6-v2",
-    "nomic": "nomic-embed-text-v1.5",
-    "openai": "text-embedding-3-small",
 }
 
 EMBEDDING_DIMENSIONS: dict[str, int] = {
     "bge-small": 384,
-    "bge-large": 1024,
-    "minilm": 384,
-    "nomic": 768,
-    "openai": 1536,
 }
 
 # ── Chunking defaults ────────────────────────────────────────────────────────
@@ -66,16 +57,13 @@ DEFAULT_CHUNK_OVERLAP = 128
 MIN_CHUNK_SIZE = 50
 MAX_CHUNK_SIZE = 8192
 CHUNK_SEPARATORS_RECURSIVE: list[str] = ["\n\n", "\n", ". ", " ", ""]
-CHUNK_SEPARATORS_SLIDING: list[str] = [" "]
 
 # ── Retrieval defaults ───────────────────────────────────────────────────────
 
 DEFAULT_TOP_K = 5
 DEFAULT_SCORE_THRESHOLD = 0.3
-DEFAULT_MMR_LAMBDA = 0.5
 MAX_TOP_K = 100
 DEFAULT_HYBRID_ALPHA = 0.5
-DEFAULT_MULTI_QUERY_COUNT = 3
 
 # ── API ──────────────────────────────────────────────────────────────────────
 
@@ -133,22 +121,6 @@ Chat History:
 Follow Up Question: {question}
 
 Standalone question:"""
-
-MULTI_QUERY_PROMPT = """You are an AI assistant helping with document retrieval.
-Given the user question below, generate {num_queries} different versions of the question
-that would help find relevant information. Each version should approach the topic from
-a slightly different angle or use different terminology.
-
-Original question: {question}
-
-Output each question on a new line, prefixed with a number (1., 2., etc.):"""
-
-HYDE_PROMPT = """Write a detailed hypothetical answer to the following question.
-This answer will be used to search for relevant documents.
-
-Question: {question}
-
-Hypothetical answer:"""
 
 ANSWER_VALIDATION_PROMPT = """You are a fact-checking assistant. Given a question, answer, and source documents,
 determine which statements in the answer are NOT supported by the sources.

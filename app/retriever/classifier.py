@@ -39,8 +39,8 @@ class ClassifiedQuery:
 _STRATEGY_MAP: dict[QueryType, list[str]] = {
     QueryType.FACTUAL: ["similarity", "hybrid"],
     QueryType.CONVERSATIONAL: ["similarity"],
-    QueryType.SUMMARIZATION: ["similarity", "mmr"],
-    QueryType.COMPARISON: ["similarity", "mmr", "hybrid"],
+    QueryType.SUMMARIZATION: ["similarity", "hybrid"],
+    QueryType.COMPARISON: ["similarity", "hybrid"],
     QueryType.REASONING: ["similarity", "hybrid"],
     QueryType.CODE: ["similarity", "hybrid"],
     QueryType.MATH: ["similarity"],
@@ -60,37 +60,39 @@ _TOP_K_MAP: dict[QueryType, int] = {
 class QueryClassifier:
     """Classifies queries using rule-based heuristics."""
 
-    # Keyword patterns for each type
-    _PATTERNS: dict[QueryType, list[re.Pattern[str]]] = {
+    # Weighted keyword patterns per type.  Intent verbs (compare, summarize,
+    # why, …) weigh more than topic keywords (python, sql, …) so that
+    # "Compare Python and Java" classifies as COMPARISON, not CODE.
+    _PATTERNS: dict[QueryType, list[tuple[re.Pattern[str], int]]] = {
         QueryType.FACTUAL: [
-            re.compile(r"\b(what|who|when|where|which|is|are|was|were)\b", re.I),
-            re.compile(r"\b(define|definition|meaning|explain)\b", re.I),
+            (re.compile(r"\b(what|who|when|where|which|is|are|was|were)\b", re.I), 2),
+            (re.compile(r"\b(define|definition|meaning|explain)\b", re.I), 3),
         ],
         QueryType.CONVERSATIONAL: [
-            re.compile(r"\b(hi|hello|hey|thanks|thank you|bye|goodbye)\b", re.I),
-            re.compile(r"\b(how are you|what's up|help me)\b", re.I),
+            (re.compile(r"\b(hi|hello|hey|thanks|thank you|bye|goodbye)\b", re.I), 3),
+            (re.compile(r"\b(how are you|what's up|help me)\b", re.I), 3),
         ],
         QueryType.SUMMARIZATION: [
-            re.compile(r"\b(summarize|summary|overview|tldr|tl;dr|brief)\b", re.I),
-            re.compile(r"\b(give me (a )?summary|key points|main ideas)\b", re.I),
+            (re.compile(r"\b(summarize|summary|overview|tldr|tl;dr|brief)\b", re.I), 3),
+            (re.compile(r"\b(give me (a )?summary|key points|main ideas)\b", re.I), 3),
         ],
         QueryType.COMPARISON: [
-            re.compile(r"\b(compare|versus|vs\.?|difference|differ|contrast)\b", re.I),
-            re.compile(r"\b(better|worse|pros and cons|advantages)\b", re.I),
+            (re.compile(r"\b(compare|versus|vs\.?|difference|differ|contrast)\b", re.I), 3),
+            (re.compile(r"\b(better|worse|pros and cons|advantages)\b", re.I), 2),
         ],
         QueryType.REASONING: [
-            re.compile(r"\b(why|how does|explain why|reason|because)\b", re.I),
-            re.compile(r"\b(cause|effect|implication|consequence)\b", re.I),
+            (re.compile(r"\b(why|how does|explain why|reason|because)\b", re.I), 3),
+            (re.compile(r"\b(cause|effect|implication|consequence)\b", re.I), 2),
         ],
         QueryType.CODE: [
-            re.compile(r"\b(code|function|class|implement|debug|error|bug)\b", re.I),
-            re.compile(r"\b(python|javascript|java|sql|html|css|api)\b", re.I),
-            re.compile(r"```|\bdef\b|\bclass\b|\bimport\b", re.I),
+            (re.compile(r"\b(code|function|class|implement|debug|error|bug)\b", re.I), 3),
+            (re.compile(r"\b(python|javascript|java|sql|html|css|api)\b", re.I), 1),
+            (re.compile(r"```|\bdef\b|\bimport\b", re.I), 3),
         ],
         QueryType.MATH: [
-            re.compile(r"\b(calculate|compute|solve|equation|formula)\b", re.I),
-            re.compile(r"\b(sum|average|mean|median|percent|ratio)\b", re.I),
-            re.compile(r"[\d]+\s*[\+\-\*/\^=]\s*[\d]+", re.I),
+            (re.compile(r"\b(calculate|compute|solve|equation|formula)\b", re.I), 3),
+            (re.compile(r"\b(sum|average|mean|median|percent|ratio)\b", re.I), 2),
+            (re.compile(r"[\d]+\s*[\+\-\*/\^=]\s*[\d]+", re.I), 3),
         ],
     }
 
@@ -114,8 +116,8 @@ class QueryClassifier:
         scores: dict[QueryType, int] = {}
         for qtype, patterns in self._PATTERNS.items():
             score = 0
-            for pattern in patterns:
-                score += len(pattern.findall(query))
+            for pattern, weight in patterns:
+                score += weight * len(pattern.findall(query))
             scores[qtype] = score
 
         # Find best match

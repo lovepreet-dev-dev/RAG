@@ -57,19 +57,19 @@ class TestRetrievalConfidence:
         ]
         conf = compute_retrieval_confidence(results)
         assert conf.total_results == 3
-        assert conf.agreement_ratio == pytest.approx(1 / 3, abs=0.01)
+        assert conf.agreement_ratio == pytest.approx(1 / 2, abs=0.01)
         assert conf.score > 0.0
 
     def test_multi_strategy_results(self) -> None:
         """Results from multiple strategies should have higher agreement."""
         results = [
             _make_result("doc1", 0.9, "similarity"),
-            _make_result("doc2", 0.8, "mmr"),
-            _make_result("doc3", 0.7, "hybrid"),
+            _make_result("doc2", 0.8, "hybrid"),
+            _make_result("doc3", 0.7, "similarity,hybrid"),
         ]
         conf = compute_retrieval_confidence(results)
         assert conf.agreement_ratio == pytest.approx(1.0, abs=0.01)
-        assert conf.strategy_counts == {"similarity": 1, "mmr": 1, "hybrid": 1}
+        assert conf.strategy_counts == {"similarity": 2, "hybrid": 2}
 
     def test_high_scores_increase_confidence(self) -> None:
         """Higher scores should produce higher confidence."""

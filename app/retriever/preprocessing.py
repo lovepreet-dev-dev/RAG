@@ -32,15 +32,27 @@ class QueryPreprocessor:
     _NOISE_PATTERNS = [
         (r"\s+", " "),                    # collapse whitespace
         (r"[^\w\s?.!,;:'\"-]", ""),      # remove special chars except basics
+        (r"([?.!,;:])\1+", r"\1"),       # collapse repeated punctuation (??? -> ?)
     ]
 
-    # Metadata filter patterns: "file:report.pdf", "page:3", "source:docs"
+    # Explicit filter syntax: "file:report.pdf", "page:3", "source:docs".
+    # These are stripped from the query text after extraction.
     _METADATA_PATTERNS = {
         "filename": r"file:(\S+)",
         "page_number": r"page:(\d+)",
         "source": r"source:(\S+)",
         "document_id": r"doc:(\S+)",
     }
+
+    # Natural-language filter mentions ("summarize report.pdf", "on page 5").
+    # These stay in the query text but still produce filters.
+    _NATURAL_PATTERNS = {
+        "filename": r"\b([\w][\w-]*\.(?:pdf|txt|docx|md|html?|csv|json))\b",
+        "page_number": r"\bpage\s+(\d+)\b",
+    }
+
+    # Pronouns that signal a short follow-up needing conversation context
+    _CONTEXT_PRONOUNS = {"it", "that", "this", "they", "them", "those", "these", "more"}
 
     # Language detection heuristics (simple keyword-based)
     _LANG_KEYWORDS: dict[str, list[str]] = {
@@ -82,8 +94,8 @@ class QueryPreprocessor:
         # Step 3: Detect language
         language = self._detect_language(cleaned)
 
-        # Step 4: Integrate conversation context if query is very short
-        if chat_history and len(cleaned.split()) < 3:
+        # Step 4: Integrate conversation context for short follow-up queries
+        if chat_history and self._needs_context(cleaned):
             cleaned = self._enrich_with_context(cleaned, chat_history)
 
         # Step 5: Estimate tokens (rough: 1 token ≈ 4 chars)
@@ -119,20 +131,22 @@ class QueryPreprocessor:
         for pattern, replacement in self._NOISE_PATTERNS:
             text = re.sub(pattern, replacement, text)
 
-        # Strip and clean edges
+        # Strip and clean edges. A trailing question mark is kept — it
+        # carries meaning; other trailing punctuation is noise.
         text = text.strip()
-        text = text.strip("?.!,;:'\"-")
+        text = text.strip(".!,;:'\"-")
+        text = text.lstrip("?")
 
-        return text
+        return text.strip()
 
     def _extract_metadata(self, query: str) -> tuple[dict[str, Any], str]:
         """Extract metadata filter expressions from the query.
 
-        Recognizes patterns like:
-        - file:report.pdf
-        - page:3
-        - source:docs
-        - doc:abc123
+        Recognizes explicit syntax (stripped from the query):
+        - file:report.pdf, page:3, source:docs, doc:abc123
+
+        And natural mentions (kept in the query):
+        - "summarize report.pdf", "what is on page 5"
 
         Args:
             query: Normalized query.
@@ -152,7 +166,19 @@ class QueryPreprocessor:
                     filters[key] = matches[0]
                 cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
 
+        for key, pattern in self._NATURAL_PATTERNS.items():
+            if key in filters:
+                continue
+            matches = re.findall(pattern, cleaned, re.IGNORECASE)
+            if matches:
+                filters[key] = int(matches[0]) if key == "page_number" else matches[0]
+
         return filters, cleaned
+
+    def _needs_context(self, query: str) -> bool:
+        """Short queries leaning on pronouns need conversation context."""
+        words = query.lower().split()
+        return len(words) <= 6 and bool(set(words) & self._CONTEXT_PRONOUNS)
 
     def _detect_language(self, query: str) -> str:
         """Detect query language using keyword heuristics.

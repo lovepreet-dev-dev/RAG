@@ -103,17 +103,17 @@ class RAGService:
             overrides: Dict of setting key-value pairs from the database.
         """
         bool_keys = {
-            "enable_mmr", "enable_hybrid_search", "enable_multi_query",
+            "enable_hybrid_search",
             "enable_reranking", "enable_answer_validation",
         }
         int_keys = {
-            "similarity_top_k", "mmr_top_k", "hybrid_top_k",
+            "similarity_top_k", "hybrid_top_k",
             "chunk_size", "chunk_overlap", "max_context_tokens", "rerank_top_k",
         }
         float_keys = {"score_threshold", "temperature"}
         str_keys = {
-            "llm_provider", "openai_model", "anthropic_model", "gemini_model",
-            "embedding_model", "vector_store",
+            "llm_provider", "openai_model", "anthropic_model",
+            "openrouter_model", "embedding_model", "vector_store",
         }
 
         for key, value in overrides.items():
@@ -204,12 +204,12 @@ class RAGService:
         return self._validator
 
     def query(self, request: QueryRequest) -> QueryResponse:
-        """Execute a RAG query through the full 10-stage pipeline.
+        """Execute a RAG query through the full pipeline.
 
         Stage 0: Preprocessing → Stage 1: Classification → Stage 2: Parallel
         retrieval → Stage 3: Merge/dedup → Stage 4: Confidence → Stage 5:
-        Expansion (if low confidence) → Stage 6: Reranking → Stage 7: Context
-        building → Stage 8: Generation → Stage 9: Validation.
+        Reranking → Stage 6: Context building → Stage 7: Generation →
+        Stage 8: Validation.
 
         Args:
             request: ``QueryRequest`` with question and parameters.
@@ -636,9 +636,10 @@ class RAGService:
             tokens: Number of tokens.
 
         Returns:
-            Estimated cost.
+            Estimated cost for the active provider (0 for local providers).
         """
-        return (tokens / 1000) * self._settings.openai_cost_per_1k_input_tokens
+        input_cost, _ = self._settings.get_cost_per_1k_tokens()
+        return (tokens / 1000) * input_cost
 
     def _compute_source_agreement(self, results: list[RetrievalResult]) -> float:
         """Fraction of results whose top file matches the majority file.

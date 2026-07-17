@@ -1,15 +1,14 @@
-"""Multi-stage parallel retrieval pipeline (10-stage production architecture).
+"""Multi-stage parallel retrieval pipeline.
 
 Stage 0: Query Preprocessing
 Stage 1: Query Classification
-Stage 2: Parallel Retrieval (similarity + MMR + hybrid + metadata)
+Stage 2: Parallel Retrieval (similarity + hybrid)
 Stage 3: Merge + Deduplicate + Normalize
 Stage 4: Retrieval Confidence
-Stage 5: Query Expansion (if confidence < threshold)
-Stage 6: Reranking (optional)
-Stage 7: Context Building
-Stage 8: LLM Generation (in rag_service)
-Stage 9: Answer Validation (in rag_service)
+Stage 5: Reranking (optional)
+Stage 6: Context Building
+Stage 7: LLM Generation (in rag_service)
+Stage 8: Answer Validation (in rag_service)
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ from app.retriever.confidence import (
     normalize_scores,
 )
 from app.retriever.context_builder import BuiltContext, ContextBuilder
-from app.retriever.expansion import QueryExpander
 from app.retriever.preprocessing import PreprocessedQuery, QueryPreprocessor
 from app.utils.helpers import estimate_tokens
 from app.utils.logging import get_logger
@@ -43,7 +41,7 @@ logger = get_logger(__name__)
 
 
 class RetrievalPipeline:
-    """10-stage production retrieval pipeline."""
+    """Multi-stage production retrieval pipeline."""
 
     def __init__(
         self,
@@ -55,7 +53,7 @@ class RetrievalPipeline:
 
         Args:
             vector_store: Vector store for all retrieval strategies.
-            llm: LLM for query expansion, classification, and validation.
+            llm: LLM used for condensing follow-up questions.
             settings: Optional settings override.
         """
         self._vector_store = vector_store
@@ -65,7 +63,6 @@ class RetrievalPipeline:
         # Sub-components
         self._preprocessor = QueryPreprocessor()
         self._classifier = QueryClassifier()
-        self._expander = QueryExpander(llm)
         self._context_builder = ContextBuilder(
             max_tokens=self._settings.max_context_tokens,
         )
@@ -79,7 +76,7 @@ class RetrievalPipeline:
         reranker: Any | None = None,
         chat_history: list[dict[str, str]] | None = None,
     ) -> tuple[list[RetrievalResult], RetrievalConfidence, ClassifiedQuery]:
-        """Execute the full 10-stage retrieval pipeline.
+        """Execute the full retrieval pipeline.
 
         Args:
             query: User query.
@@ -153,23 +150,7 @@ class RetrievalPipeline:
             chunk_overlap=round(confidence.chunk_overlap_ratio, 3),
         )
 
-        # ── Stage 5: Query Expansion (if low confidence) ─────────────────
-        if (
-            self._settings.enable_multi_query
-            and self._llm is not None
-            and confidence.score < self._settings.multi_query_threshold
-        ):
-            logger.info(
-                "stage_5_expansion_triggered",
-                confidence=round(confidence.score, 4),
-                threshold=self._settings.multi_query_threshold,
-            )
-            normalized = self._expand_and_merge(
-                search_query, normalized, extracted_filters,
-            )
-            confidence = compute_retrieval_confidence(normalized)
-
-        # ── Stage 6: Reranking (optional) ────────────────────────────────
+        # ── Stage 5: Reranking (optional) ────────────────────────────────
         should_rerank = (
             enable_reranking
             if enable_reranking is not None
@@ -187,7 +168,7 @@ class RetrievalPipeline:
                 for doc, score in reranked
             ]
             logger.info(
-                "stage_6_reranking",
+                "stage_5_reranking",
                 before=len(deduped),
                 after=len(normalized),
             )
@@ -237,19 +218,12 @@ class RetrievalPipeline:
         all_results: list[RetrievalResult] = []
         futures: dict[Any, str] = {}
 
-        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="retrieval") as executor:
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval") as executor:
             # Always run similarity
             futures[executor.submit(
                 self._similarity_search, query,
                 self._settings.similarity_top_k, metadata_filter,
             )] = "similarity"
-
-            # MMR if enabled
-            if self._settings.enable_mmr:
-                futures[executor.submit(
-                    self._mmr_search, query,
-                    self._settings.mmr_top_k, metadata_filter,
-                )] = "mmr"
 
             # Hybrid if enabled
             if self._settings.enable_hybrid_search:
@@ -287,39 +261,6 @@ class RetrievalPipeline:
             for doc, score in results
         ]
 
-    def _mmr_search(
-        self, query: str, k: int, metadata_filter: dict[str, Any] | None,
-    ) -> list[RetrievalResult]:
-        """Execute MMR search with diversity filtering."""
-        start = time.perf_counter()
-        candidates = self._vector_store.similarity_search_with_score(
-            query, k=k * 3, filter_dict=metadata_filter,
-        )
-        if not candidates:
-            return []
-
-        selected: list[tuple[Document, float]] = [candidates[0]]
-        remaining = list(candidates[1:])
-        lambda_mult = self._settings.mmr_lambda
-
-        while len(selected) < k and remaining:
-            best_idx = 0
-            best_mmr = float("-inf")
-            for i, (doc, score) in enumerate(remaining):
-                max_sim = max(self._word_overlap(doc, s) for s, _ in selected)
-                mmr = lambda_mult * score - (1 - lambda_mult) * max_sim
-                if mmr > best_mmr:
-                    best_mmr = mmr
-                    best_idx = i
-            selected.append(remaining.pop(best_idx))
-
-        elapsed = (time.perf_counter() - start) * 1000
-        logger.debug("mmr_complete", count=len(selected), ms=round(elapsed, 2))
-        return [
-            RetrievalResult(document=doc, score=score, strategy="mmr")
-            for doc, score in selected
-        ]
-
     def _hybrid_search(
         self, query: str, k: int, metadata_filter: dict[str, Any] | None,
     ) -> list[RetrievalResult]:
@@ -334,57 +275,6 @@ class RetrievalPipeline:
             RetrievalResult(document=doc, score=score, strategy="hybrid")
             for doc, score in results
         ]
-
-    def _expand_and_merge(
-        self,
-        query: str,
-        existing: list[RetrievalResult],
-        metadata_filter: dict[str, Any] | None,
-    ) -> list[RetrievalResult]:
-        """Expand query and merge additional results (Stage 5)."""
-        start = time.perf_counter()
-
-        # Multi-query expansion
-        expanded = self._expander.expand_multi_query(
-            query, self._settings.multi_query_count,
-        )
-
-        # HyDE expansion
-        if self._settings.enable_hyde:
-            hyde_query = self._expander.expand_hyde(query)
-            expanded.append(hyde_query)
-
-        # Synonym expansion
-        if self._settings.enable_synonym_expansion:
-            synonym_query = self._expander.expand_synonyms(query)
-            if synonym_query != query:
-                expanded.append(synonym_query)
-
-        # Retrieve with expanded queries
-        new_results: list[RetrievalResult] = []
-        for q in expanded:
-            results = self._vector_store.similarity_search_with_score(
-                query=q, k=self._settings.similarity_top_k,
-                filter_dict=metadata_filter,
-            )
-            for doc, score in results:
-                new_results.append(
-                    RetrievalResult(document=doc, score=score, strategy="multi_query")
-                )
-
-        all_results = existing + new_results
-        merged = deduplicate_results(all_results)
-        normalized = normalize_scores(merged)
-
-        elapsed = (time.perf_counter() - start) * 1000
-        logger.info(
-            "stage_5_expansion_complete",
-            queries_generated=len(expanded),
-            new_results=len(new_results),
-            total_after_merge=len(normalized),
-            latency_ms=round(elapsed, 2),
-        )
-        return normalized
 
     def select_final_context(
         self, results: list[RetrievalResult], max_tokens: int | None = None,
@@ -424,15 +314,6 @@ class RetrievalPipeline:
             logger.warning("condense_failed", error=str(exc))
             return question
 
-    @staticmethod
-    def _word_overlap(doc_a: Document, doc_b: Document) -> float:
-        """Jaccard word-overlap similarity."""
-        words_a = set(doc_a.page_content.lower().split())
-        words_b = set(doc_b.page_content.lower().split())
-        if not words_a or not words_b:
-            return 0.0
-        return len(words_a & words_b) / len(words_a | words_b)
-
 
 # ── Legacy compatibility ──────────────────────────────────────────────────────
 
@@ -470,6 +351,8 @@ class RAGRetriever:
             enable_reranking=enable_reranking,
             reranker=reranker,
         )
+        if top_k is not None:
+            results = results[:top_k]
         return [(r.document, r.score) for r in results]
 
     def condense_question(

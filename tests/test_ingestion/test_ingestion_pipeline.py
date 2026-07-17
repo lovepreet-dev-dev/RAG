@@ -7,7 +7,7 @@ Covers all 12 production-readiness requirements:
 4. Globally unique chunk IDs
 5. Skip invalid chunks (empty, whitespace, too short)
 6. Hash file bytes before loading (streamed SHA-256)
-7. SemanticChunker reuse
+7. (removed — semantic chunking was cut)
 8. CSV/JSON configurable batching
 9. OCR fallback for PDFs
 10. Per-file error handling in batch ingestion
@@ -24,12 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.documents import Document
 
-from app.ingestion.chunking import (
-    _get_semantic_chunker,
-    _is_valid_chunk,
-    chunk_documents,
-    reset_semantic_chunker_cache,
-)
+from app.ingestion.chunking import _is_valid_chunk, chunk_documents
 from app.ingestion.loaders import compute_file_hash, load_document
 from app.ingestion.pipeline import (
     DuplicateLRUCache,
@@ -47,10 +42,8 @@ from app.utils.helpers import generate_content_hash
 def _reset_caches():
     """Reset global caches before each test."""
     reset_duplicate_cache()
-    reset_semantic_chunker_cache()
     yield
     reset_duplicate_cache()
-    reset_semantic_chunker_cache()
 
 
 # ── 1. Persistent duplicate detection ────────────────────────────────────────
@@ -322,45 +315,6 @@ class TestHashBeforeLoad:
         for doc in docs:
             assert "content_hash" in doc.metadata
             assert len(doc.metadata["content_hash"]) == 64
-
-
-# ── 7. SemanticChunker reuse ──────────────────────────────────────────────────
-
-
-class TestSemanticChunkerReuse:
-    """SemanticChunker should be cached and reused across calls."""
-
-    def test_cache_hit(self) -> None:
-        """Calling _get_semantic_chunker twice should return the same instance."""
-        from unittest.mock import patch as mock_patch
-
-        from app.config.settings import Settings
-
-        settings = Settings()
-
-        with mock_patch("app.embeddings.factory.get_embeddings_model") as mock_emb:
-            mock_emb.return_value = MagicMock()
-            chunker1 = _get_semantic_chunker(settings)
-            chunker2 = _get_semantic_chunker(settings)
-            assert chunker1 is chunker2
-            # get_embeddings_model should be called only once
-            assert mock_emb.call_count == 1
-
-    def test_cache_reset(self) -> None:
-        """reset_semantic_chunker_cache should clear the cache."""
-        from unittest.mock import patch as mock_patch
-
-        from app.config.settings import Settings
-
-        settings = Settings()
-
-        with mock_patch("app.embeddings.factory.get_embeddings_model") as mock_emb:
-            mock_emb.return_value = MagicMock()
-            _get_semantic_chunker(settings)
-            reset_semantic_chunker_cache()
-            _get_semantic_chunker(settings)
-            # get_embeddings_model should be called twice (once per cache miss)
-            assert mock_emb.call_count == 2
 
 
 # ── 8. CSV/JSON configurable batching ─────────────────────────────────────────

@@ -13,7 +13,7 @@ from app.vectorstore.faiss_store import FAISSVectorStore
 @pytest.fixture
 def embeddings():
     """Create a sentence-transformer embedding model for tests."""
-    settings = Settings(embedding_model=EmbeddingModelType.MINILM, embedding_device="cpu")
+    settings = Settings(embedding_model=EmbeddingModelType.BGE_SMALL, embedding_device="cpu")
     return get_embeddings_model(settings)
 
 

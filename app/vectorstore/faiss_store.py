@@ -66,16 +66,16 @@ class FAISSVectorStore(BaseVectorStore):
                 logger.warning("faiss_auto_load_failed", error=str(exc))
 
     def _build_index(self) -> None:
-        """Initialise an empty FAISS index via lazy import."""
+        """Import FAISS lazily. The index itself is created on first use,
+        once the true embedding dimension is known from actual vectors."""
         try:
             import faiss
             import numpy as np
 
             self._faiss = faiss
             self._np = np
-            dim = getattr(self._embedding_function, "dimension", 384)
-            self._index = faiss.IndexFlatL2(dim)
-            self._dimension = dim
+            self._index = None
+            self._dimension: Optional[int] = None
         except ImportError:
             raise ImportError(
                 "FAISS is required for FAISSVectorStore. "
@@ -87,14 +87,24 @@ class FAISSVectorStore(BaseVectorStore):
         embeddings = self._embedding_function.embed_documents(texts)
         return self._np.array(embeddings, dtype=self._np.float32)
 
+    def _ensure_index(self, dim: int) -> None:
+        """Create the FAISS index on first use with the observed dimension."""
+        if self._index is None:
+            self._index = self._faiss.IndexFlatL2(dim)
+            self._dimension = dim
+
     def _refresh_index(self) -> None:
         """Rebuild the FAISS index from the current docstore."""
-        self._index = self._faiss.IndexFlatL2(self._dimension)
         if self._docstore:
             texts = [d.page_content for d in self._docstore.values()]
-            if texts:
-                vectors = self._embed_texts(texts)
-                self._index.add(vectors)
+            vectors = self._embed_texts(texts)
+            self._index = self._faiss.IndexFlatL2(int(vectors.shape[1]))
+            self._dimension = int(vectors.shape[1])
+            self._index.add(vectors)
+        elif self._dimension is not None:
+            self._index = self._faiss.IndexFlatL2(self._dimension)
+        else:
+            self._index = None
 
     # ---- BaseVectorStore interface ----
 
@@ -123,6 +133,7 @@ class FAISSVectorStore(BaseVectorStore):
         vectors = self._embed_texts(texts)
 
         with self._lock:
+            self._ensure_index(int(vectors.shape[1]))
             self._index.add(vectors)
 
             for i, doc in enumerate(documents):
@@ -178,7 +189,7 @@ class FAISSVectorStore(BaseVectorStore):
         Returns:
             List of (Document, score) tuples.
         """
-        if self._index.ntotal == 0:
+        if self._index is None or self._index.ntotal == 0:
             return []
 
         query_vector = self._embed_texts([query])
@@ -331,7 +342,8 @@ class FAISSVectorStore(BaseVectorStore):
 
         with self._lock:
             dir_path.mkdir(parents=True, exist_ok=True)
-            self._faiss.write_index(self._index, str(dir_path / "index.faiss"))
+            if self._index is not None:
+                self._faiss.write_index(self._index, str(dir_path / "index.faiss"))
             (dir_path / "metadata.json").write_text(json.dumps(self._metadata, indent=2))
             (dir_path / "ids.json").write_text(json.dumps(self._ids))
             docstore_data = {k: {"page_content": v.page_content, "metadata": v.metadata} for k, v in self._docstore.items()}
@@ -349,7 +361,10 @@ class FAISSVectorStore(BaseVectorStore):
             logger.warning("faiss_load_missing", path=str(dir_path))
             return
 
-        self._index = self._faiss.read_index(str(dir_path / "index.faiss"))
+        index_path = dir_path / "index.faiss"
+        if index_path.exists():
+            self._index = self._faiss.read_index(str(index_path))
+            self._dimension = int(self._index.d)
         meta_path = dir_path / "metadata.json"
         if meta_path.exists():
             self._metadata = json.loads(meta_path.read_text())

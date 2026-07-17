@@ -37,13 +37,14 @@ class LLMProvider(str, Enum):
     """Enumeration of supported Large Language Model providers.
 
     Each value maps to a factory function in ``app.llm.factory``.
+    OpenRouter proxies most other model families (Gemini, Llama, Mistral, …)
+    through an OpenAI-compatible API, and any OpenAI-compatible local server
+    (e.g. LM Studio) works via ``OPENAI_BASE_URL``.
     """
 
     OPENAI = "openai"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
-    GEMINI = "gemini"
-    LMSTUDIO = "lmstudio"
     OPENROUTER = "openrouter"
 
 
@@ -55,36 +56,21 @@ class EmbeddingModelType(str, Enum):
     """
 
     BGE_SMALL = "bge-small"
-    BGE_LARGE = "bge-large"
-    MINILM = "minilm"
-    OPENAI = "openai"
-    NOMIC = "nomic"
 
 
 class VectorStoreType(str, Enum):
-    """Enumeration of supported vector store backends.
-
-    Switching the backend requires only setting ``VECTOR_STORE``
-    in the environment — no code changes needed.
-    """
+    """Enumeration of supported vector store backends."""
 
     FAISS = "faiss"
-    CHROMA = "chroma"
-    QDRANT = "qdrant"
-    PINECONE = "pinecone"
 
 
 class ChunkingStrategy(str, Enum):
     """Text chunking strategies available in the ingestion pipeline.
 
-    ``recursive``  — fast, rule-based, good default.
-    ``semantic``   — groups sentences by embedding similarity.
-    ``sliding_window`` — fixed-size windows with overlap.
+    ``recursive`` — splits on paragraph → sentence → word boundaries.
     """
 
     RECURSIVE = "recursive"
-    SEMANTIC = "semantic"
-    SLIDING_WINDOW = "sliding_window"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -132,13 +118,6 @@ class Settings(BaseSettings):
         description="Anthropic model identifier.",
     )
 
-    # Google Gemini
-    gemini_api_key: str = Field(default="", description="Google AI / Gemini API key.")
-    gemini_model: str = Field(
-        default="gemini-1.5-flash",
-        description="Gemini model identifier.",
-    )
-
     # Ollama (local)
     ollama_base_url: str = Field(
         default="http://localhost:11434",
@@ -147,16 +126,6 @@ class Settings(BaseSettings):
     ollama_model: str = Field(
         default="llama3.2",
         description="Ollama model tag to use.",
-    )
-
-    # LM Studio (local)
-    lmstudio_base_url: str = Field(
-        default="http://localhost:1234/v1",
-        description="Base URL of the LM Studio OpenAI-compatible server.",
-    )
-    lmstudio_model: str = Field(
-        default="local-model",
-        description="Model name reported by LM Studio.",
     )
 
     # OpenRouter
@@ -192,35 +161,6 @@ class Settings(BaseSettings):
         description="Vector store backend.",
     )
 
-    # Chroma-specific
-    chroma_persist_dir: str = Field(
-        default="./data/chroma",
-        description="Chroma persistence directory.",
-    )
-    chroma_collection: str = Field(
-        default="rag_documents",
-        description="Chroma collection name.",
-    )
-
-    # Qdrant-specific
-    qdrant_host: str = Field(default="localhost", description="Qdrant host.")
-    qdrant_port: int = Field(default=6333, description="Qdrant port.")
-    qdrant_collection: str = Field(
-        default="rag_documents",
-        description="Qdrant collection name.",
-    )
-
-    # Pinecone-specific
-    pinecone_api_key: str = Field(default="", description="Pinecone API key.")
-    pinecone_index: str = Field(
-        default="rag-documents",
-        description="Pinecone index name.",
-    )
-    pinecone_environment: str = Field(
-        default="us-east-1",
-        description="Pinecone cloud region.",
-    )
-
     # FAISS-specific
     faiss_index_dir: str = Field(
         default="./data/faiss_index",
@@ -244,12 +184,6 @@ class Settings(BaseSettings):
         ge=0,
         le=2048,
         description="Overlap between consecutive chunks.",
-    )
-    semantic_chunk_threshold: float = Field(
-        default=0.75,
-        ge=0.0,
-        le=1.0,
-        description="Percentile breakpoint for semantic chunking.",
     )
     min_chunk_length: int = Field(
         default=10,
@@ -302,12 +236,6 @@ class Settings(BaseSettings):
         le=100,
         description="Top-K results from similarity search.",
     )
-    mmr_top_k: int = Field(
-        default=10,
-        ge=1,
-        le=100,
-        description="Top-K results from MMR search.",
-    )
     hybrid_top_k: int = Field(
         default=10,
         ge=1,
@@ -316,25 +244,9 @@ class Settings(BaseSettings):
     )
 
     # Strategy toggles
-    enable_mmr: bool = Field(
-        default=True,
-        description="Enable Maximal Marginal Relevance for diversity.",
-    )
     enable_hybrid_search: bool = Field(
         default=True,
         description="Enable hybrid semantic + keyword search.",
-    )
-    enable_multi_query: bool = Field(
-        default=True,
-        description="Enable multi-query fallback when confidence is low.",
-    )
-
-    # MMR settings
-    mmr_lambda: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="MMR diversity weight (0=max diversity, 1=max relevance).",
     )
 
     # Hybrid settings
@@ -345,20 +257,6 @@ class Settings(BaseSettings):
         description="Weight for semantic score in hybrid mode.",
     )
 
-    # Multi-query fallback
-    multi_query_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Confidence threshold below which multi-query fallback triggers.",
-    )
-    multi_query_count: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Number of alternative queries to generate in multi-query fallback.",
-    )
-
     # Context limits
     max_context_tokens: int = Field(
         default=3000,
@@ -367,46 +265,10 @@ class Settings(BaseSettings):
         description="Maximum total tokens for context sent to the LLM.",
     )
 
-    # Query preprocessing
-    enable_query_preprocessing: bool = Field(
-        default=True,
-        description="Enable query normalization and metadata extraction.",
-    )
-    enable_query_classification: bool = Field(
-        default=True,
-        description="Enable query type classification for strategy routing.",
-    )
-
-    # Query expansion
-    enable_hyde: bool = Field(
-        default=False,
-        description="Enable HyDE (Hypothetical Document Embeddings) expansion.",
-    )
-    enable_synonym_expansion: bool = Field(
-        default=True,
-        description="Enable synonym-based query expansion.",
-    )
-    enable_keyword_expansion: bool = Field(
-        default=True,
-        description="Enable keyword extraction and expansion.",
-    )
-
     # Answer validation
     enable_answer_validation: bool = Field(
         default=True,
         description="Enable post-generation answer validation.",
-    )
-
-    # Parent document retrieval
-    enable_parent_document: bool = Field(
-        default=False,
-        description="Retrieve parent documents instead of child chunks.",
-    )
-
-    # Metadata search
-    enable_metadata_search: bool = Field(
-        default=True,
-        description="Enable metadata-aware search alongside semantic search.",
     )
 
     # ── Reranking ────────────────────────────────────────────────────────
@@ -557,16 +419,39 @@ class Settings(BaseSettings):
     )
 
     # ── Cost Tracking ────────────────────────────────────────────────────
+    # Per-provider pricing so cost estimates are honest for every backend.
+    # Local providers (Ollama) always cost 0. OpenRouter pricing varies per
+    # model, so it defaults to 0 unless configured.
 
     openai_cost_per_1k_input_tokens: float = Field(
         default=0.005,
         ge=0.0,
-        description="Cost per 1k input tokens (USD).",
+        description="OpenAI cost per 1k input tokens (USD).",
     )
     openai_cost_per_1k_output_tokens: float = Field(
         default=0.015,
         ge=0.0,
-        description="Cost per 1k output tokens (USD).",
+        description="OpenAI cost per 1k output tokens (USD).",
+    )
+    anthropic_cost_per_1k_input_tokens: float = Field(
+        default=0.003,
+        ge=0.0,
+        description="Anthropic cost per 1k input tokens (USD).",
+    )
+    anthropic_cost_per_1k_output_tokens: float = Field(
+        default=0.015,
+        ge=0.0,
+        description="Anthropic cost per 1k output tokens (USD).",
+    )
+    openrouter_cost_per_1k_input_tokens: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="OpenRouter cost per 1k input tokens (USD); model-dependent.",
+    )
+    openrouter_cost_per_1k_output_tokens: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="OpenRouter cost per 1k output tokens (USD); model-dependent.",
     )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -665,8 +550,6 @@ class Settings(BaseSettings):
             LLMProvider.OPENAI: self.openai_model,
             LLMProvider.OLLAMA: self.ollama_model,
             LLMProvider.ANTHROPIC: self.anthropic_model,
-            LLMProvider.GEMINI: self.gemini_model,
-            LLMProvider.LMSTUDIO: self.lmstudio_model,
             LLMProvider.OPENROUTER: self.openrouter_model,
         }
         return model_map[self.llm_provider]
@@ -680,8 +563,6 @@ class Settings(BaseSettings):
         key_map: dict[LLMProvider, str] = {
             LLMProvider.OPENAI: self.openai_api_key,
             LLMProvider.ANTHROPIC: self.anthropic_api_key,
-            LLMProvider.GEMINI: self.gemini_api_key,
-            LLMProvider.LMSTUDIO: "",
             LLMProvider.OLLAMA: "",
             LLMProvider.OPENROUTER: self.openrouter_api_key,
         }
@@ -696,8 +577,6 @@ class Settings(BaseSettings):
         url_map: dict[LLMProvider, Optional[str]] = {
             LLMProvider.OPENAI: self.openai_base_url,
             LLMProvider.ANTHROPIC: None,
-            LLMProvider.GEMINI: None,
-            LLMProvider.LMSTUDIO: self.lmstudio_base_url,
             LLMProvider.OLLAMA: self.ollama_base_url,
             LLMProvider.OPENROUTER: self.openrouter_base_url,
         }
@@ -709,7 +588,30 @@ class Settings(BaseSettings):
         Returns:
             ``True`` if an API key is required.
         """
-        return self.llm_provider not in {LLMProvider.OLLAMA, LLMProvider.LMSTUDIO}
+        return self.llm_provider is not LLMProvider.OLLAMA
+
+    def get_cost_per_1k_tokens(self) -> tuple[float, float]:
+        """Return (input, output) cost per 1k tokens for the active provider.
+
+        Returns:
+            Tuple of USD costs; ``(0.0, 0.0)`` for local providers.
+        """
+        cost_map: dict[LLMProvider, tuple[float, float]] = {
+            LLMProvider.OPENAI: (
+                self.openai_cost_per_1k_input_tokens,
+                self.openai_cost_per_1k_output_tokens,
+            ),
+            LLMProvider.ANTHROPIC: (
+                self.anthropic_cost_per_1k_input_tokens,
+                self.anthropic_cost_per_1k_output_tokens,
+            ),
+            LLMProvider.OPENROUTER: (
+                self.openrouter_cost_per_1k_input_tokens,
+                self.openrouter_cost_per_1k_output_tokens,
+            ),
+            LLMProvider.OLLAMA: (0.0, 0.0),
+        }
+        return cost_map[self.llm_provider]
 
     def max_upload_bytes(self) -> int:
         """Return the maximum upload size in bytes.
@@ -738,12 +640,6 @@ class Settings(BaseSettings):
                 f"LLM provider '{self.llm_provider.value}' requires an API key "
                 f"but none was provided."
             )
-
-        if self.vector_store == VectorStoreType.PINECONE and not self.pinecone_api_key:
-            issues.append("PINECONE_API_KEY is not set.")
-
-        if self.embedding_model == EmbeddingModelType.OPENAI and not self.openai_api_key:
-            issues.append("Embedding model is OpenAI but OPENAI_API_KEY is not set.")
 
         if self.log_level == "DEBUG":
             issues.append("Log level is DEBUG — expect high verbosity in production.")

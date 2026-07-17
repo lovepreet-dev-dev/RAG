@@ -1,7 +1,8 @@
 """Factory for creating vector store instances.
 
-Switching the backend requires only changing the ``VECTOR_STORE``
-environment variable — no code changes needed.
+FAISS is the single supported backend: it is local, fast, and needs no
+external service.  The factory indirection is kept so an additional backend
+can be reintroduced without touching call sites.
 """
 
 from __future__ import annotations
@@ -54,34 +55,6 @@ def get_vector_store(
         _check_embedding_version(settings, settings.faiss_index_dir)
 
         return store
-
-    if store_type == VectorStoreType.CHROMA:
-        from app.vectorstore.chroma_store import ChromaVectorStore
-
-        return ChromaVectorStore(
-            embedding_function=embeddings,
-            persist_directory=settings.chroma_persist_dir,
-            collection_name=settings.chroma_collection,
-        )
-
-    if store_type == VectorStoreType.QDRANT:
-        from app.vectorstore.qdrant_store import QdrantVectorStore
-
-        return QdrantVectorStore(
-            embedding_function=embeddings,
-            qdrant_url=f"http://{settings.qdrant_host}:{settings.qdrant_port}",
-            collection_name=settings.qdrant_collection,
-        )
-
-    if store_type == VectorStoreType.PINECONE:
-        from app.vectorstore.pinecone_store import PineconeVectorStore
-
-        return PineconeVectorStore(
-            embedding_function=embeddings,
-            api_key=settings.pinecone_api_key,
-            index_name=settings.pinecone_index,
-            environment=settings.pinecone_environment,
-        )
 
     raise ValueError(f"Unsupported vector store type: {store_type}")
 

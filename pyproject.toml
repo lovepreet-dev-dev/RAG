@@ -32,14 +32,6 @@ dev = [
     "mypy>=1.8",
     "isort>=5.13",
 ]
-all = [
-    "chromadb>=0.4",
-    "qdrant-client>=1.7",
-    "pinecone-client>=3.0",
-    "anthropic>=0.20",
-    "google-generativeai>=0.4",
-]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

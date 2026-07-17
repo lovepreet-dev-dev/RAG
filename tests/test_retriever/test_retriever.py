@@ -47,7 +47,7 @@ class TestRAGRetriever:
 
     def test_similarity_retrieval(self, populated_store) -> None:
         """Similarity search should return results."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         retriever = RAGRetriever(vector_store=populated_store, settings=settings)
         results = retriever.retrieve(
             "programming language", top_k=2, retrieval_mode="similarity",
@@ -57,14 +57,14 @@ class TestRAGRetriever:
 
     def test_retrieval_respects_top_k(self, populated_store) -> None:
         """Results should not exceed top_k."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         retriever = RAGRetriever(vector_store=populated_store, settings=settings)
         results = retriever.retrieve("data", top_k=1, retrieval_mode="similarity")
         assert len(results) <= 1
 
     def test_metadata_filter(self, populated_store) -> None:
         """Metadata filter should narrow results."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         retriever = RAGRetriever(vector_store=populated_store, settings=settings)
         results = retriever.retrieve(
             "programming",
@@ -77,7 +77,7 @@ class TestRAGRetriever:
 
     def test_score_threshold(self, populated_store) -> None:
         """Score threshold should filter out low-scoring results."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         retriever = RAGRetriever(vector_store=populated_store, settings=settings)
         results = retriever.retrieve(
             "programming language",
@@ -93,7 +93,7 @@ class TestRetrievalPipeline:
 
     def test_pipeline_returns_results(self, populated_store) -> None:
         """Pipeline should return results and confidence."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         pipeline = RetrievalPipeline(
             vector_store=populated_store,
             llm=None,
@@ -105,7 +105,7 @@ class TestRetrievalPipeline:
 
     def test_pipeline_deduplicates(self, populated_store) -> None:
         """Pipeline should deduplicate results."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         pipeline = RetrievalPipeline(
             vector_store=populated_store,
             llm=None,
@@ -117,7 +117,7 @@ class TestRetrievalPipeline:
 
     def test_pipeline_respects_token_budget(self, populated_store) -> None:
         """Pipeline context selection should respect token budget."""
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         pipeline = RetrievalPipeline(
             vector_store=populated_store,
             llm=None,

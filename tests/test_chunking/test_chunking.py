@@ -87,33 +87,6 @@ class TestRecursiveChunking:
         assert len(chunks) >= 1
 
 
-class TestSlidingWindowChunking:
-    """Tests for sliding window chunking."""
-
-    def test_sliding_window_produces_chunks(self, sample_documents: list[Document]) -> None:
-        """Sliding window should produce overlapping chunks."""
-        chunks = chunk_documents(
-            sample_documents,
-            strategy=ChunkingStrategy.SLIDING_WINDOW,
-            chunk_size=200,
-            chunk_overlap=50,
-        )
-        assert len(chunks) > 0
-
-    def test_sliding_window_overlap(self, sample_documents: list[Document]) -> None:
-        """Consecutive chunks should share overlapping content."""
-        chunks = chunk_documents(
-            sample_documents,
-            strategy=ChunkingStrategy.SLIDING_WINDOW,
-            chunk_size=150,
-            chunk_overlap=50,
-        )
-        if len(chunks) >= 2:
-            words_1 = set(chunks[0].page_content.split())
-            words_2 = set(chunks[1].page_content.split())
-            assert len(words_1 & words_2) > 0
-
-
 class TestEdgeCases:
     """Tests for edge cases."""
 

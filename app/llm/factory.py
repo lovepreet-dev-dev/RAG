@@ -40,8 +40,6 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
         LLMProvider.OPENAI: _create_openai,
         LLMProvider.OLLAMA: _create_ollama,
         LLMProvider.ANTHROPIC: _create_anthropic,
-        LLMProvider.GEMINI: _create_gemini,
-        LLMProvider.LMSTUDIO: _create_lmstudio,
         LLMProvider.OPENROUTER: _create_openrouter,
     }
 
@@ -110,43 +108,6 @@ def _create_anthropic(settings: Settings) -> BaseChatModel:
         max_tokens=2048,
         timeout=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
-    )
-
-
-def _create_gemini(settings: Settings) -> BaseChatModel:
-    """Create a Google Gemini chat model.
-
-    Args:
-        settings: Application settings.
-
-    Returns:
-        ``ChatGoogleGenerativeAI`` instance.
-    """
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.gemini_api_key,
-        temperature=0.3,
-    )
-
-
-def _create_lmstudio(settings: Settings) -> BaseChatModel:
-    """Create an LM Studio chat model (OpenAI-compatible local server).
-
-    Args:
-        settings: Application settings.
-
-    Returns:
-        ``ChatOpenAI`` instance pointing to LM Studio.
-    """
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI(
-        model=settings.lmstudio_model,
-        base_url=settings.lmstudio_base_url,
-        api_key="not-needed",
-        temperature=0.3,
     )
 
 

@@ -22,17 +22,13 @@ class ChunkingStrategyEnum(str, Enum):
     """Chunking strategies exposed via the API."""
 
     RECURSIVE = "recursive"
-    SEMANTIC = "semantic"
-    SLIDING_WINDOW = "sliding_window"
 
 
 class RetrievalModeEnum(str, Enum):
     """Retrieval modes exposed via the API."""
 
     SIMILARITY = "similarity"
-    MMR = "mmr"
     HYBRID = "hybrid"
-    MULTI_QUERY = "multi_query"
 
 
 # ── Document Models ──────────────────────────────────────────────────────────

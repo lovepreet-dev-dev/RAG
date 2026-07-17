@@ -85,13 +85,16 @@ def compute_retrieval_confidence(
     # Normalize variance: 0 variance = 1.0, high variance approaches 0.0
     variance_signal = max(0.0, 1.0 - min(score_variance, 1.0))
 
-    # Agreement: fraction of strategies that contributed results
+    # Agreement: fraction of strategies that contributed results.
+    # Deduplicated results carry merged provenance ("hybrid,similarity"),
+    # so split labels to count every contributing strategy.
     strategy_counts: dict[str, int] = {}
     for r in results:
-        strategy_counts[r.strategy] = strategy_counts.get(r.strategy, 0) + 1
+        for s in r.strategy.split(","):
+            strategy_counts[s] = strategy_counts.get(s, 0) + 1
     active_strategies = len(strategy_counts)
-    total_possible = 3  # similarity, mmr, hybrid
-    agreement_ratio = active_strategies / total_possible
+    total_possible = 2  # similarity, hybrid
+    agreement_ratio = min(1.0, active_strategies / total_possible)
 
     # Document diversity: unique content hashes vs total results
     unique_contents = len({r.document.page_content for r in results})
@@ -289,8 +292,19 @@ def deduplicate_results(
     seen: dict[str, RetrievalResult] = {}
     for r in results:
         key = r.document.page_content
-        if key not in seen or r.score > seen[key].score:
+        existing = seen.get(key)
+        if existing is None:
             seen[key] = r
+            continue
+        # Same document found by another strategy: keep the best score but
+        # preserve provenance as a comma-joined label ("hybrid,similarity").
+        strategies = sorted(set(existing.strategy.split(",")) | set(r.strategy.split(",")))
+        best = r if r.score > existing.score else existing
+        seen[key] = RetrievalResult(
+            document=best.document,
+            score=best.score,
+            strategy=",".join(strategies),
+        )
     return sorted(seen.values(), key=lambda x: x.score, reverse=True)
 
 

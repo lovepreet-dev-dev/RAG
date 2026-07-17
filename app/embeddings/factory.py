@@ -1,7 +1,8 @@
 """Factory for creating embedding model instances.
 
 Uses lazy imports so that heavy libraries (torch, sentence-transformers)
-are only loaded when an embedding model is actually needed.
+are only loaded when an embedding model is actually needed.  BGE-small is
+the single supported model: local, free, and strong for its size.
 """
 
 from __future__ import annotations
@@ -44,16 +45,8 @@ def get_embeddings_model(settings: Settings | None = None) -> Embeddings:
         device=settings.embedding_device,
     )
 
-    if model_type in (
-        EmbeddingModelType.BGE_SMALL,
-        EmbeddingModelType.BGE_LARGE,
-        EmbeddingModelType.MINILM,
-    ):
+    if model_type == EmbeddingModelType.BGE_SMALL:
         model = _create_sentence_transformer(model_type, settings)
-    elif model_type == EmbeddingModelType.NOMIC:
-        model = _create_nomic(settings)
-    elif model_type == EmbeddingModelType.OPENAI:
-        model = _create_openai(settings)
     else:
         raise ValueError(f"Unsupported embedding model type: {model_type}")
 
@@ -85,51 +78,3 @@ def _create_sentence_transformer(
             "batch_size": settings.embedding_batch_size,
         },
     )
-
-
-def _create_nomic(settings: Settings) -> Embeddings:
-    """Create a Nomic embeddings model.
-
-    Args:
-        settings: Application settings for device and batch size.
-
-    Returns:
-        HuggingFaceEmbeddings configured for Nomic.
-    """
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-
-    return HuggingFaceEmbeddings(
-        model_name="nomic-ai/nomic-embed-text-v1.5",
-        model_kwargs={
-            "device": settings.embedding_device,
-            "trust_remote_code": True,
-        },
-        encode_kwargs={
-            "normalize_embeddings": True,
-            "batch_size": settings.embedding_batch_size,
-        },
-    )
-
-
-def _create_openai(settings: Settings) -> Embeddings:
-    """Create an OpenAI-compatible embedding model.
-
-    Args:
-        settings: Application settings containing API keys and URLs.
-
-    Returns:
-        OpenAIEmbeddings instance.
-    """
-    from langchain_openai import OpenAIEmbeddings
-
-    kwargs: dict[str, str | None] = {
-        "model": settings.openai_embedding_model,
-        "api_key": settings.openai_api_key or "dummy",
-    }
-
-    if settings.embedding_model == EmbeddingModelType.OPENAI:
-        kwargs["base_url"] = settings.openai_base_url
-    elif settings.get_llm_base_url():
-        kwargs["base_url"] = settings.get_llm_base_url()
-
-    return OpenAIEmbeddings(**kwargs)  # type: ignore[arg-type]

@@ -63,9 +63,7 @@ def populated_store(fake_embeddings, sample_docs, tmp_path) -> FAISSVectorStore:
 def pipeline(populated_store) -> RetrievalPipeline:
     """Create a RetrievalPipeline with default settings."""
     settings = Settings(
-        enable_mmr=True,
         enable_hybrid_search=True,
-        enable_multi_query=False,  # Disable LLM-dependent tests
     )
     return RetrievalPipeline(
         vector_store=populated_store,
@@ -87,9 +85,9 @@ class TestParallelRetrieval:
         assert confidence.score >= 0.0
 
     def test_multiple_strategies_used(self, pipeline) -> None:
-        """Results should come from multiple strategies."""
+        """Results should carry provenance from multiple strategies."""
         results, _, _ = pipeline.retrieve("programming language")
-        strategies = {r.strategy for r in results}
+        strategies = {s for r in results for s in r.strategy.split(",")}
         assert len(strategies) > 1
 
     def test_results_are_retrieval_results(self, pipeline) -> None:
@@ -112,26 +110,6 @@ class TestParallelRetrieval:
         results_high, _, _ = pipeline.retrieve("programming", score_threshold=0.99)
         results_low, _, _ = pipeline.retrieve("programming", score_threshold=0.0)
         assert len(results_high) <= len(results_low)
-
-
-# ── MMR search ──────────────────────────────────────────────────────────────
-
-
-class TestMMRSearch:
-    """Tests for MMR diversity search."""
-
-    def test_mmr_returns_results(self, pipeline) -> None:
-        """MMR should return results."""
-        results = pipeline._mmr_search("programming", k=3, metadata_filter=None)
-        assert len(results) > 0
-        assert all(r.strategy == "mmr" for r in results)
-
-    def test_mmr_diversity(self, pipeline) -> None:
-        """MMR results should be diverse."""
-        results = pipeline._mmr_search("programming", k=3, metadata_filter=None)
-        filenames = [r.document.metadata.get("filename", "") for r in results]
-        # MMR should prefer diverse sources
-        assert len(set(filenames)) > 0
 
 
 # ── Hybrid search ────────────────────────────────────────────────────────────
@@ -203,7 +181,7 @@ class TestConfidenceInPipeline:
     def test_confidence_with_strategies(self, pipeline) -> None:
         """Confidence should account for multi-strategy agreement."""
         _, confidence, _ = pipeline.retrieve("programming language")
-        # With similarity + mmr + hybrid enabled, agreement should be > 0
+        # With similarity + hybrid enabled, agreement should be > 0
         assert confidence.agreement_ratio > 0.0
 
 
@@ -217,7 +195,7 @@ class TestLegacyCompatibility:
         """Legacy retrieve should return (Document, score) tuples."""
         from app.retriever.rag_retriever import RAGRetriever
 
-        settings = Settings(enable_multi_query=False)
+        settings = Settings()
         retriever = RAGRetriever(
             vector_store=populated_store,
             llm=None,

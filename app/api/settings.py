@@ -28,15 +28,12 @@ class SettingsResponse(BaseModel):
     llm_provider: str = "openai"
     openai_model: str = "gpt-4o-mini"
     anthropic_model: str = "claude-3-5-sonnet-20241022"
-    gemini_model: str = "gemini-1.5-flash"
+    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct:free"
     embedding_model: str = "bge-small"
     vector_store: str = "faiss"
-    enable_mmr: bool = False
     enable_hybrid_search: bool = False
-    enable_multi_query: bool = False
     enable_reranking: bool = False
     similarity_top_k: int = 10
-    mmr_top_k: int = 10
     hybrid_top_k: int = 10
     chunk_size: int = 512
     chunk_overlap: int = 128
@@ -53,15 +50,12 @@ class SettingsUpdateRequest(BaseModel):
     llm_provider: Optional[str] = None
     openai_model: Optional[str] = None
     anthropic_model: Optional[str] = None
-    gemini_model: Optional[str] = None
+    openrouter_model: Optional[str] = None
     embedding_model: Optional[str] = None
     vector_store: Optional[str] = None
-    enable_mmr: Optional[bool] = None
     enable_hybrid_search: Optional[bool] = None
-    enable_multi_query: Optional[bool] = None
     enable_reranking: Optional[bool] = None
     similarity_top_k: Optional[int] = Field(None, ge=1, le=100)
-    mmr_top_k: Optional[int] = Field(None, ge=1, le=100)
     hybrid_top_k: Optional[int] = Field(None, ge=1, le=100)
     chunk_size: Optional[int] = Field(None, ge=50, le=8192)
     chunk_overlap: Optional[int] = Field(None, ge=0, le=4096)
@@ -77,15 +71,12 @@ _DEFAULTS = {
     "llm_provider": "openai",
     "openai_model": "gpt-4o-mini",
     "anthropic_model": "claude-3-5-sonnet-20241022",
-    "gemini_model": "gemini-1.5-flash",
+    "openrouter_model": "meta-llama/llama-3.1-8b-instruct:free",
     "embedding_model": "bge-small",
     "vector_store": "faiss",
-    "enable_mmr": "true",
     "enable_hybrid_search": "true",
-    "enable_multi_query": "true",
     "enable_reranking": "false",
     "similarity_top_k": "10",
-    "mmr_top_k": "10",
     "hybrid_top_k": "10",
     "chunk_size": "512",
     "chunk_overlap": "128",
@@ -141,15 +132,12 @@ def get_settings_endpoint(
         llm_provider=_get_setting_value(db, "llm_provider"),
         openai_model=_get_setting_value(db, "openai_model"),
         anthropic_model=_get_setting_value(db, "anthropic_model"),
-        gemini_model=_get_setting_value(db, "gemini_model"),
+        openrouter_model=_get_setting_value(db, "openrouter_model"),
         embedding_model=_get_setting_value(db, "embedding_model"),
         vector_store=_get_setting_value(db, "vector_store"),
-        enable_mmr=_parse_bool(_get_setting_value(db, "enable_mmr")),
         enable_hybrid_search=_parse_bool(_get_setting_value(db, "enable_hybrid_search")),
-        enable_multi_query=_parse_bool(_get_setting_value(db, "enable_multi_query")),
         enable_reranking=_parse_bool(_get_setting_value(db, "enable_reranking")),
         similarity_top_k=int(_get_setting_value(db, "similarity_top_k")),
-        mmr_top_k=int(_get_setting_value(db, "mmr_top_k")),
         hybrid_top_k=int(_get_setting_value(db, "hybrid_top_k")),
         chunk_size=int(_get_setting_value(db, "chunk_size")),
         chunk_overlap=int(_get_setting_value(db, "chunk_overlap")),
