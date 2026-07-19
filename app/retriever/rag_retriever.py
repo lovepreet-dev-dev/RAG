@@ -14,7 +14,6 @@ Stage 8: Answer Validation (in rag_service)
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from langchain_core.documents import Document
@@ -215,34 +214,25 @@ class RetrievalPipeline:
         Returns:
             Combined results from all strategies.
         """
+        # Strategies run sequentially, not in parallel threads: similarity and
+        # hybrid both embed the query with the same HuggingFace fast tokenizer,
+        # which is not thread-safe (concurrent use panics with "Already
+        # borrowed"). Hybrid is dominated by CPU-bound BM25 work anyway, so
+        # parallelism bought little.
+        strategies: list[tuple[str, Any, int]] = [
+            ("similarity", self._similarity_search, self._settings.similarity_top_k),
+        ]
+        if self._settings.enable_hybrid_search:
+            strategies.append(
+                ("hybrid", self._hybrid_search, self._settings.hybrid_top_k)
+            )
+
         all_results: list[RetrievalResult] = []
-        futures: dict[Any, str] = {}
-
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval") as executor:
-            # Always run similarity
-            futures[executor.submit(
-                self._similarity_search, query,
-                self._settings.similarity_top_k, metadata_filter,
-            )] = "similarity"
-
-            # Hybrid if enabled
-            if self._settings.enable_hybrid_search:
-                futures[executor.submit(
-                    self._hybrid_search, query,
-                    self._settings.hybrid_top_k, metadata_filter,
-                )] = "hybrid"
-
-            for future in as_completed(futures):
-                strategy = futures[future]
-                try:
-                    results = future.result()
-                    all_results.extend(results)
-                except Exception as exc:
-                    logger.error(
-                        "retrieval_strategy_failed",
-                        strategy=strategy,
-                        error=str(exc),
-                    )
+        for name, search_fn, k in strategies:
+            try:
+                all_results.extend(search_fn(query, k, metadata_filter))
+            except Exception as exc:
+                logger.error("retrieval_strategy_failed", strategy=name, error=str(exc))
 
         return all_results
 

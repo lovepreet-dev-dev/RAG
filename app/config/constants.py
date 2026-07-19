@@ -28,6 +28,7 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".htm": "html",
     ".csv": "csv",
     ".json": "json",
+    ".jsonl": "jsonl",
 }
 
 SUPPORTED_MIME_TYPES: dict[str, str] = {
@@ -38,6 +39,7 @@ SUPPORTED_MIME_TYPES: dict[str, str] = {
     "html": "text/html",
     "csv": "text/csv",
     "json": "application/json",
+    "jsonl": "application/jsonl",
 }
 
 # ── Embedding model map ──────────────────────────────────────────────────────

@@ -39,7 +39,7 @@ class DocumentMetadata(BaseModel):
 
     filename: str = ""
     page_number: int = 0
-    chunk_id: int = 0
+    chunk_id: str = ""
     document_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = ""
@@ -149,7 +149,7 @@ class SourceDocument(BaseModel):
     content: str
     filename: str
     page_number: int
-    chunk_id: int
+    chunk_id: str = ""
     document_id: str
     score: Optional[float] = None
 

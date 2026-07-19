@@ -14,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import logging
 import os
 import threading
 from pathlib import Path
@@ -22,9 +21,10 @@ from typing import Any, Optional
 
 from langchain_core.documents import Document
 
+from app.utils.logging import get_logger
 from app.vectorstore.base import BaseVectorStore
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FAISSVectorStore(BaseVectorStore):
@@ -71,6 +71,15 @@ class FAISSVectorStore(BaseVectorStore):
         try:
             import faiss
             import numpy as np
+
+            # Pin FAISS to a single OpenMP thread. When torch/sentence-transformers
+            # is also loaded (as it always is here), FAISS's multithreaded search
+            # can deadlock against torch's OpenMP runtime on macOS. Single-threaded
+            # search over these index sizes is still sub-millisecond.
+            try:
+                faiss.omp_set_num_threads(1)
+            except Exception:  # pragma: no cover - defensive
+                pass
 
             self._faiss = faiss
             self._np = np

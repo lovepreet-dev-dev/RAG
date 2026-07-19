@@ -84,6 +84,7 @@ def load_document(file_path: str, filename: Optional[str] = None) -> list[Docume
         "html": _load_html,
         "csv": _load_csv,
         "json": _load_json,
+        "jsonl": _load_jsonl,
     }
 
     loader_fn = loaders.get(file_type)
@@ -359,3 +360,74 @@ def _load_json(path: Path, filename: str) -> list[Document]:
             },
         )
     ]
+
+
+# Fields tried, in order, when picking the main text of a JSONL record.
+_JSONL_TEXT_KEYS = ("text", "content", "body", "abstract", "passage")
+
+
+def _load_jsonl(path: Path, filename: str) -> list[Document]:
+    """Load a JSON-Lines file (one JSON object per line).
+
+    Each line becomes one Document.  The main text is taken from the first
+    present key in ``_JSONL_TEXT_KEYS``; a ``title`` is prepended when present,
+    and ``id``/``url``/``source``/``title`` are preserved as metadata so
+    citations can point back to the original record.  Lines that are not the
+    expected object shape fall back to the full JSON dump.
+
+    Args:
+        path: Path to the JSONL file.
+        filename: Display name.
+
+    Returns:
+        List of Documents, one per non-empty line.
+    """
+    docs: list[Document] = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line_no, line in enumerate(fh, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("jsonl_line_skipped", filename=filename, line=line_no)
+                continue
+
+            if isinstance(obj, dict):
+                text = ""
+                for key in _JSONL_TEXT_KEYS:
+                    if str(obj.get(key, "")).strip():
+                        text = str(obj[key])
+                        break
+                if not text:
+                    text = json.dumps(obj, indent=2)
+                title = str(obj.get("title", "")).strip()
+                if title:
+                    text = f"{title}\n\n{text}"
+                metadata = {
+                    "filename": filename,
+                    "page_number": line_no,
+                    "content_type": "application/jsonl",
+                    "record_id": obj.get("id", ""),
+                    "record_url": obj.get("url", ""),
+                    "record_source": obj.get("source", ""),
+                    "record_title": title,
+                }
+            else:
+                text = json.dumps(obj, indent=2) if not isinstance(obj, str) else obj
+                metadata = {
+                    "filename": filename,
+                    "page_number": line_no,
+                    "content_type": "application/jsonl",
+                }
+
+            cleaned = clean_text(text)
+            if cleaned:
+                docs.append(Document(page_content=cleaned, metadata=metadata))
+
+    if not docs:
+        return _load_text(path, filename)
+
+    logger.info("jsonl_loaded", filename=filename, records=len(docs))
+    return docs

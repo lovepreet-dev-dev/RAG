@@ -32,6 +32,9 @@ class Reranker:
             settings = get_settings()
 
         self._model_name = model_name or settings.reranker_model
+        # Use the same device as embeddings.  Left unset, sentence-transformers
+        # auto-selects MPS on Apple Silicon, where CrossEncoder init can hang.
+        self._device = settings.embedding_device
         self._model = None
         self._load_model()
 
@@ -40,8 +43,8 @@ class Reranker:
         try:
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self._model_name)
-            logger.info("reranker_loaded", model=self._model_name)
+            self._model = CrossEncoder(self._model_name, device=self._device)
+            logger.info("reranker_loaded", model=self._model_name, device=self._device)
         except Exception as exc:
             logger.error(
                 "failed_to_load_reranker",
