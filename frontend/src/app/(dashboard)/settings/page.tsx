@@ -43,6 +43,16 @@ export default function SettingsPage() {
   const set = (key: string, value: unknown) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // Each provider stores its model name under its own key; Ollama's model is
+  // server-side only, so it has no editable field here.
+  const provider = String(get("llm_provider") || "openai");
+  const modelFields: Record<string, { key: string; placeholder: string }> = {
+    openai: { key: "openai_model", placeholder: "gpt-4o-mini" },
+    anthropic: { key: "anthropic_model", placeholder: "claude-3-5-sonnet-20241022" },
+    openrouter: { key: "openrouter_model", placeholder: "meta-llama/llama-3.1-8b-instruct:free" },
+  };
+  const modelField = modelFields[provider];
+
   const handleSave = () => {
     updateMutation.mutate(form as Record<string, unknown>);
     setForm({});
@@ -89,69 +99,64 @@ export default function SettingsPage() {
               <SelectContent>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                <SelectItem value="gemini">Google Gemini</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
                 <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                <SelectItem value="lmstudio">LM Studio (Local)</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {modelField ? (
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Input
+                value={String(get(modelField.key) || "")}
+                onChange={(e) => set(modelField.key, e.target.value)}
+                placeholder={modelField.placeholder}
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              The Ollama model is configured on the server via the{" "}
+              <code className="font-mono">OLLAMA_MODEL</code> environment variable.
+            </p>
+          )}
           <div className="space-y-2">
-            <Label>Model</Label>
+            <Label>Temperature</Label>
             <Input
-              value={String(get("openai_model") || "")}
-              onChange={(e) => set("openai_model", e.target.value)}
-              placeholder="gpt-4o-mini"
+              type="number"
+              step="0.1"
+              min="0"
+              max="2"
+              value={String(get("temperature") ?? 0.3)}
+              onChange={(e) => set("temperature", parseFloat(e.target.value))}
             />
+            <p className="text-xs text-muted-foreground">
+              Lower values give more focused, deterministic answers.
+            </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Embeddings */}
+      {/* Index */}
       <Card>
         <CardHeader>
-          <CardTitle>Embeddings</CardTitle>
-          <CardDescription>Configure the embedding model</CardDescription>
+          <CardTitle>Index</CardTitle>
+          <CardDescription>Embedding model and vector store</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label>Embedding Model</Label>
-            <Select value={String(get("embedding_model") || "")} onValueChange={(v) => set("embedding_model", v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bge-small">BGE Small</SelectItem>
-                <SelectItem value="bge-large">BGE Large</SelectItem>
-                <SelectItem value="minilm">MiniLM</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="nomic">Nomic</SelectItem>
-              </SelectContent>
-            </Select>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground">Embedding Model</Label>
+            <p className="text-sm font-medium">BAAI/bge-small-en-v1.5</p>
+            <p className="text-xs text-muted-foreground">
+              384 dimensions, runs locally — no embedding API cost.
+            </p>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Vector Store */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Vector Store</CardTitle>
-          <CardDescription>Choose your vector database backend</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label>Vector Store</Label>
-            <Select value={String(get("vector_store") || "")} onValueChange={(v) => set("vector_store", v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select store" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="faiss">FAISS</SelectItem>
-                <SelectItem value="chroma">Chroma</SelectItem>
-                <SelectItem value="qdrant">Qdrant</SelectItem>
-                <SelectItem value="pinecone">Pinecone</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="space-y-1">
+            <Label className="text-muted-foreground">Vector Store</Label>
+            <p className="text-sm font-medium">FAISS</p>
+            <p className="text-xs text-muted-foreground">
+              Persisted to disk. Changing these requires re-indexing all documents,
+              so they are set on the server.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -173,11 +178,11 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>MMR Top K</Label>
+              <Label>Hybrid Top K</Label>
               <Input
                 type="number"
-                value={String(get("mmr_top_k") || 10)}
-                onChange={(e) => set("mmr_top_k", parseInt(e.target.value))}
+                value={String(get("hybrid_top_k") || 10)}
+                onChange={(e) => set("hybrid_top_k", parseInt(e.target.value))}
               />
             </div>
             <div className="space-y-2">
@@ -196,6 +201,33 @@ export default function SettingsPage() {
                 onChange={(e) => set("chunk_overlap", parseInt(e.target.value))}
               />
             </div>
+            <div className="space-y-2">
+              <Label>Score Threshold</Label>
+              <Input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                value={String(get("score_threshold") ?? 0.3)}
+                onChange={(e) => set("score_threshold", parseFloat(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rerank Top K</Label>
+              <Input
+                type="number"
+                value={String(get("rerank_top_k") || 5)}
+                onChange={(e) => set("rerank_top_k", parseInt(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Max Context Tokens</Label>
+              <Input
+                type="number"
+                value={String(get("max_context_tokens") || 3000)}
+                onChange={(e) => set("max_context_tokens", parseInt(e.target.value))}
+              />
+            </div>
           </div>
 
           <Separator />
@@ -203,32 +235,14 @@ export default function SettingsPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label>MMR (Maximal Marginal Relevance)</Label>
-                <p className="text-xs text-muted-foreground">Enable diversity-aware retrieval</p>
-              </div>
-              <Switch
-                checked={Boolean(get("enable_mmr"))}
-                onCheckedChange={(v) => set("enable_mmr", v)}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
                 <Label>Hybrid Search</Label>
-                <p className="text-xs text-muted-foreground">Combine semantic and keyword search</p>
+                <p className="text-xs text-muted-foreground">
+                  Combine dense vector search with BM25 keyword search
+                </p>
               </div>
               <Switch
                 checked={Boolean(get("enable_hybrid_search"))}
                 onCheckedChange={(v) => set("enable_hybrid_search", v)}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Multi-Query</Label>
-                <p className="text-xs text-muted-foreground">Generate alternative queries for low-confidence results</p>
-              </div>
-              <Switch
-                checked={Boolean(get("enable_multi_query"))}
-                onCheckedChange={(v) => set("enable_multi_query", v)}
               />
             </div>
             <div className="flex items-center justify-between">
@@ -239,6 +253,18 @@ export default function SettingsPage() {
               <Switch
                 checked={Boolean(get("enable_reranking"))}
                 onCheckedChange={(v) => set("enable_reranking", v)}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Answer Validation</Label>
+                <p className="text-xs text-muted-foreground">
+                  Check the generated answer against its sources for unsupported claims
+                </p>
+              </div>
+              <Switch
+                checked={Boolean(get("enable_answer_validation"))}
+                onCheckedChange={(v) => set("enable_answer_validation", v)}
               />
             </div>
           </div>

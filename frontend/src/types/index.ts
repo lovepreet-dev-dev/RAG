@@ -168,21 +168,20 @@ export interface Settings {
   llm_provider: string;
   openai_model: string;
   anthropic_model: string;
-  gemini_model: string;
+  openrouter_model: string;
   embedding_model: string;
   vector_store: string;
-  enable_mmr: boolean;
   enable_hybrid_search: boolean;
-  enable_multi_query: boolean;
   enable_reranking: boolean;
+  enable_answer_validation: boolean;
   similarity_top_k: number;
-  mmr_top_k: number;
   hybrid_top_k: number;
   chunk_size: number;
   chunk_overlap: number;
   max_context_tokens: number;
   score_threshold: number;
   rerank_top_k: number;
+  temperature: number;
 }
 
 export interface AppSettings extends Settings {}
