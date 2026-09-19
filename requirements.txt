@@ -9,7 +9,7 @@ pydantic-settings==2.7.1
 
 # LangChain Core
 langchain==0.3.14
-langchain-core==0.3.29
+langchain-core==0.3.31
 langchain-community==0.3.14
 langchain-text-splitters==0.3.4
 langchain-openai==0.3.0
@@ -30,7 +30,7 @@ faiss-cpu==1.9.0.post1
 # LLM Providers
 openai==1.58.1
 anthropic==0.42.0
-ollama==0.4.4
+ollama==0.6.2
 
 # Database
 sqlalchemy==2.0.36
@@ -50,6 +50,10 @@ slowapi==0.1.9
 # Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 predates bcrypt 4.1+: it reads the removed bcrypt.__about__,
+# and its startup self-test hashes a >72-byte password, which bcrypt 5.x
+# rejects outright instead of truncating. Pin to the last fully compatible release.
+bcrypt==4.0.1
 
 # Testing
 pytest==8.3.4
