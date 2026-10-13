@@ -26,7 +26,7 @@ export function useLogin() {
         login(
           {
             id: "default",
-            email: "admin@localhost",
+            email: "admin@example.com",
             name: "Admin",
             role: "admin",
             is_active: true,

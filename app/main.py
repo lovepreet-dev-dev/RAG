@@ -80,16 +80,16 @@ def _seed_default_admin():
         SessionLocal = _get_session_factory()
         db = SessionLocal()
         try:
-            existing = db.query(User).filter(User.email == "admin@localhost").first()
+            existing = db.query(User).filter(User.email == "admin@example.com").first()
             if not existing:
                 create_user(
                     db=db,
-                    email="admin@localhost",
+                    email="admin@example.com",
                     name="Admin",
                     password="admin",
                     role=Role.ADMIN,
                 )
-                get_logger(__name__).info("default_admin_seeded", email="admin@localhost")
+                get_logger(__name__).info("default_admin_seeded", email="admin@example.com")
         finally:
             db.close()
     except Exception as e:

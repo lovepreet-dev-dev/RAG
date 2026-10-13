@@ -149,7 +149,7 @@ def _get_or_create_default_user(db: Session) -> User:
     """
     from app.services.auth_service import create_user
 
-    default_email = "admin@localhost"
+    default_email = "admin@example.com"
 
     user = db.query(User).filter(User.email == default_email).first()
     if user is None:
