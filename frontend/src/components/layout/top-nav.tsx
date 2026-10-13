@@ -37,12 +37,12 @@ export function TopNav() {
 
         {/* User Menu */}
         <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                {user?.name?.charAt(0)?.toUpperCase() || "U"}
-              </div>
-            </Button>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" className="relative h-8 w-8 rounded-full" />}
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+              {user?.name?.charAt(0)?.toUpperCase() || "U"}
+            </div>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <div className="flex items-center gap-2 p-2">
