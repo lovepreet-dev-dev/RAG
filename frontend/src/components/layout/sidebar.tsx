@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
-import { useChatStore } from "@/stores/chat-store";
+import { useChatSessions, useCreateChatSession } from "@/hooks/use-api";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -41,17 +41,22 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, hasRole, logout } = useAuthStore();
-  const { sessions, activeSessionId, createSession, setActiveSession } =
-    useChatStore();
+  // Same API-backed source the chat page's sidebar uses, so the two lists
+  // can't drift apart. Previously this read a local-only store, so sessions
+  // shown here never matched the real ones on the server.
+  const { data: sessionData } = useChatSessions();
+  const createSession = useCreateChatSession();
   const { theme, setTheme } = useThemeStore();
   const [collapsed, setCollapsed] = useState(false);
 
+  const sessions = sessionData?.sessions ?? [];
   const filteredNav = navItems.filter((item) => hasRole(...item.roles));
 
-  const handleNewChat = () => {
-    createSession();
-    window.location.href = "/chat";
+  const handleNewChat = async () => {
+    const session = await createSession.mutateAsync("New Chat");
+    router.push(`/chat/${session.id}`);
   };
 
   return (
@@ -96,6 +101,7 @@ export function Sidebar() {
             collapsed && "justify-center px-0",
           )}
           onClick={handleNewChat}
+          disabled={createSession.isPending}
         >
           <Plus className="h-4 w-4" />
           {!collapsed && <span>New Chat</span>}
@@ -109,13 +115,10 @@ export function Sidebar() {
             {sessions.map((session) => (
               <div key={session.id} className="group relative">
                 <button
-                  onClick={() => {
-                    setActiveSession(session.id);
-                    window.location.href = `/chat/${session.id}`;
-                  }}
+                  onClick={() => router.push(`/chat/${session.id}`)}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent",
-                    activeSessionId === session.id && "bg-sidebar-accent",
+                    pathname === `/chat/${session.id}` && "bg-sidebar-accent",
                   )}
                 >
                   <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
